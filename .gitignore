@@ -1,0 +1,16 @@
+# Environment
+.venv/
+.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Database
+*.db
+
+# API credentials
+config/google_credentials.json
+
+# IDE
+.vscode/
