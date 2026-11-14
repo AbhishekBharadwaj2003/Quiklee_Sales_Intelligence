@@ -7,6 +7,8 @@ import re
 import pandas as pd
 import streamlit as st
 
+from database.db import initialize_database
+
 from database.campaign_research_queue import (
     get_campaign_research_queue,
     get_research_queue_summary,
@@ -40,6 +42,9 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Create the SQLite schema on first cloud startup.
+initialize_database()
 
 FILES = {
     "crm": DATA_DIR / "Quiklee Sales CRM - Leads.csv",
