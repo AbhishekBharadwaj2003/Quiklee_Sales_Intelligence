@@ -22,7 +22,7 @@ from database.campaign_research_controller import (
 from database.campaign_linker import link_campaign_companies
 from enrichment.lusha_reveal_ui import render_lusha_reveal_ui
 from enrichment.lusha_discovery_ui import render_lusha_discovery_ui
-from campaign_workflow import run_campaign_traffic_validation, score_campaign_leads, get_campaign_intelligence, build_campaign_report
+from campaign_workflow import run_campaign_traffic_validation, score_campaign_leads, get_campaign_intelligence, build_campaign_report, reset_campaign_traffic_to_pending
 
 from database.campaign_repository import (
     create_campaign,
@@ -1071,7 +1071,20 @@ elif page == "Campaign Management":
                     use_container_width=True,
                     hide_index=True,
                 )
-        st.caption("Only companies without a completed traffic status are included in the next batch. Qualified, below-threshold and manual-review records are skipped.")
+        st.caption("Spreadsheet visitor estimates are retained in the original uploaded data, but are not treated as verified traffic. Only completed TabAPI lookups can qualify a company.")
+        reset_confirm = st.checkbox(
+            "I understand this will clear the imported/unverified visitor figures for this campaign and return all its companies to pending TabAPI validation.",
+            key="reset_traffic_confirm_" + str(campaign_id),
+        )
+        if st.button(
+            "Reset this campaign's traffic to pending",
+            disabled=not reset_confirm,
+            key="reset_traffic_" + str(campaign_id),
+        ):
+            reset_count = reset_campaign_traffic_to_pending(campaign_id)
+            st.session_state.pop(batch_result_key, None)
+            st.success(str(reset_count) + " campaign records returned to pending. Original spreadsheet data is preserved.")
+            st.rerun()
 
         st.subheader("8. Calculate lead scores")
         if st.button("Score qualified companies", key="score_campaign_" + str(selected_campaign["id"])):
