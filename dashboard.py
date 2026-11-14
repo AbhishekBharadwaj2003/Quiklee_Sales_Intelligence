@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from database.db import initialize_database
+from database.company_repository import update_company
 
 from database.campaign_research_queue import (
     get_campaign_research_queue,
@@ -1058,6 +1059,21 @@ elif page == "Campaign Management":
             ]
 
             display_table(queue_df, 400)
+
+            missing_websites = [item for item in research_queue if not item.get('website')]
+            for company_item in missing_websites:
+                website_value = st.text_input(
+                    'Official website for ' + company_item['company_name'],
+                    value='https://cahoot.in/' if company_item['company_name'].strip().lower() == 'cahoot' else '',
+                    key='company_website_' + str(company_item['company_id']),
+                )
+                if st.button('Save official website', key='save_website_' + str(company_item['company_id'])):
+                    if website_value.strip().startswith(('https://', 'http://')):
+                        update_company(company_item['company_id'], {'website_url': website_value.strip()})
+                        st.success('Website saved.')
+                        st.rerun()
+                    else:
+                        st.error('Enter a full URL beginning with https://')
 
             st.download_button(
                 "Download Research Queue",
