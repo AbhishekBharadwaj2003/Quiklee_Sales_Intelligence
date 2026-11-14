@@ -840,7 +840,9 @@ elif page == "Campaign Management":
         with st.expander("View campaign summary table"):
             campaign_summary = pd.DataFrame(campaigns)
             summary_columns = [column for column in ["id", "campaign_name", "source_filename", "source_row_count", "saved_records", "status", "created_at"] if column in campaign_summary.columns]
-            display_table(campaign_summary[summary_columns], 350)        st.divider()
+            display_table(campaign_summary[summary_columns], 350)
+
+        st.divider()
 
         st.subheader("5. Inspect campaign records")
 
