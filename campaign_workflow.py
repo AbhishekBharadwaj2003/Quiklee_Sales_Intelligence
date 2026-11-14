@@ -12,31 +12,42 @@ from database.research_repository import get_company_research_history
 TRAFFIC_THRESHOLD = 100000
 
 
-def run_campaign_traffic_validation(campaign_id, months=3):
-    """Fetch TabAPI traffic once per unique linked company and save results."""
+def run_campaign_traffic_validation(campaign_id, months=3, batch_size=10):
+    """Validate at most batch_size pending unique companies per click."""
     with get_db() as connection:
         rows = connection.execute(
-            "SELECT id, company_id, source_brand_name, website FROM campaign_records WHERE campaign_id=? ORDER BY source_row_number",
+            "SELECT id, company_id, source_brand_name, website, monthly_visits, traffic_status FROM campaign_records WHERE campaign_id=? ORDER BY source_row_number",
             (campaign_id,),
         ).fetchall()
     unique = {}
     for row in rows:
         item = dict(row)
-        if item.get('company_id'):
-            existing = unique.get(item['company_id'])
-            if existing is None or (not existing.get('website') and item.get('website')):
-                unique[item['company_id']] = item
+        company_id = item.get('company_id')
+        if not company_id:
+            continue
+        existing = unique.get(company_id)
+        if existing is None or (not existing.get('website') and item.get('website')):
+            unique[company_id] = item
+    pending = [
+        (company_id, item) for company_id, item in unique.items()
+        if item.get('traffic_status') not in ('qualified', 'below_threshold', 'manual_review')
+    ][:max(1, int(batch_size))]
     results = []
-    for company_id, item in unique.items():
+    for company_id, item in pending:
         company = get_company_by_id(company_id) or {}
         website = item.get('website') or company.get('website_url') or ''
-        domain = str(website).strip().replace('https://', '').replace('http://', '').split('/')[0].lower().removeprefix('www.')
+        domain = str(website).strip().replace('https://', '').replace('http://', '').split('/')[0].split('?')[0].lower().removeprefix('www.')
         if not domain:
-            results.append({'company': item['source_brand_name'], 'domain': '', 'monthly_visits': None, 'traffic_status': 'pending', 'error': 'Website URL missing'})
+            with get_db() as connection:
+                connection.execute("UPDATE campaign_records SET traffic_status='manual_review' WHERE campaign_id=? AND company_id=?", (campaign_id, company_id))
+            results.append({'company': item['source_brand_name'], 'domain': '', 'monthly_visits': None, 'traffic_status': 'manual_review', 'error': 'Website URL missing'})
             continue
         if not company.get('website_url'):
             update_company(company_id, {'website_url': website})
-        result = analyse_traffic(domain, months=months)
+        try:
+            result = analyse_traffic(domain, months=months)
+        except Exception as error:
+            result = {'status': 'unavailable', 'error': str(error)}
         visits = result.get('monthly_visits') if result.get('status') == 'completed' else None
         status = 'qualified' if visits is not None and float(visits) >= TRAFFIC_THRESHOLD else ('below_threshold' if visits is not None else 'pending')
         with get_db() as connection:
@@ -45,8 +56,9 @@ def run_campaign_traffic_validation(campaign_id, months=3):
         findings.update({'traffic_status': 'completed' if visits is not None else 'unavailable', 'research_status': 'completed' if visits is not None else 'unavailable', 'eligibility_status': status, 'threshold': TRAFFIC_THRESHOLD})
         add_research_record(company_id, 'traffic_analysis', 'TabAPI', findings, source_url=website)
         results.append({'company': item['source_brand_name'], 'domain': domain, 'monthly_visits': visits, 'traffic_status': status, 'credits_charged': result.get('credits_charged'), 'error': result.get('error')})
-    return results
-
+    with get_db() as connection:
+        remaining_rows = connection.execute("SELECT DISTINCT company_id FROM campaign_records WHERE campaign_id=? AND company_id IS NOT NULL AND (traffic_status IS NULL OR traffic_status NOT IN ('qualified','below_threshold','manual_review'))", (campaign_id,)).fetchall()
+    return {'processed_this_batch': len(results), 'batch_size': max(1, int(batch_size)), 'remaining': len(remaining_rows), 'results': results}
 
 def score_campaign_leads(campaign_id):
     """Score every unique traffic-qualified company in a campaign."""
