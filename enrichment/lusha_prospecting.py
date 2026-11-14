@@ -2,9 +2,7 @@
 import os
 import requests
 
-from dotenv import load_dotenv
-
-load_dotenv()
+from config.settings import LUSHA_API_KEY
 
 BASE_URL = "https://api.lusha.com/v3"
 
@@ -15,7 +13,7 @@ ENRICH_ENDPOINT = f"{BASE_URL}/contacts/enrich"
 class LushaProspectingClient:
 
     def __init__(self):
-        self.api_key = os.getenv("LUSHA_API_KEY")
+        self.api_key = LUSHA_API_KEY
 
         if not self.api_key:
             raise ValueError("LUSHA_API_KEY is missing from .env")
