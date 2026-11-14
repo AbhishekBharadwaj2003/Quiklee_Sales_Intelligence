@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from database.db import initialize_database
-from database.company_repository import update_company
+from database.company_repository import update_company, get_all_companies
 
 from database.campaign_research_queue import (
     get_campaign_research_queue,
@@ -20,6 +20,7 @@ from database.campaign_research_controller import (
     run_campaign_research,
 )
 from database.campaign_linker import link_campaign_companies
+from enrichment.lusha_discovery_ui import render_lusha_discovery_ui
 
 from database.campaign_repository import (
     create_campaign,
@@ -525,40 +526,43 @@ elif page == "Lead Prioritisation":
 elif page == "Contact Intelligence":
 
     st.title("CONTACT INTELLIGENCE")
-    st.caption(
-        "Explore the contact intelligence capabilities "
-        "of the Quiklee Sales Intelligence platform."
-    )
+    st.caption("Discover relevant decision-makers for qualified companies using Lusha.")
 
-    st.info(
-        "Contact records and Lusha integrations are disabled "
-        "in this public demonstration to protect confidential "
-        "business and contact information."
-    )
-
-    st.subheader("Available Capabilities")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("**Contact Discovery**")
-        st.write(
-            "Identify relevant business decision-makers "
-            "and organise prospect information."
+    companies = get_all_companies()
+    if not companies:
+        st.info("No companies are available yet. Upload a campaign and link its companies first.")
+    else:
+        company = st.selectbox(
+            "Select company",
+            companies,
+            format_func=lambda item: f"{item['company_name']} — {item.get('website_url') or 'website missing'}",
+            key="lusha_company_selector",
+        )
+        if company.get("qualification_score") is not None:
+            st.metric("Lead score", f"{company['qualification_score']:.2f}")
+        render_lusha_discovery_ui(
+            FILES["lusha"],
+            company["id"],
+            company["company_name"],
+            company.get("website_url"),
         )
 
-    with col2:
-        st.markdown("**Contact Enrichment**")
-        st.write(
-            "Enrich prospect records with business contact "
-            "intelligence through authorised integrations."
-        )
+        st.divider()
+        st.subheader("Saved contact records")
+        if FILES["lusha"].exists():
+            saved_contacts = pd.read_csv(FILES["lusha"], dtype=str).fillna("")
+            if "company_domain" in saved_contacts.columns:
+                domain = str(company.get("domain") or "").lower()
+                saved_contacts = saved_contacts[saved_contacts["company_domain"].str.lower().str.contains(domain, na=False)] if domain else saved_contacts.iloc[0:0]
+            display_columns = [col for col in ["contact_name", "designation", "company_name", "linkedin_url", "enrichment_status"] if col in saved_contacts.columns]
+            if not saved_contacts.empty and display_columns:
+                display_table(saved_contacts[display_columns], 400)
+            else:
+                st.info("No discovered contacts saved for this company yet.")
+        else:
+            st.info("No Lusha prospecting results saved yet.")
 
-    st.caption(
-        "Live contact discovery and paid contact reveals "
-        "are not available in this public demo."
-    )
-
+        st.caption("Prospecting search and email/phone reveal are separate operations. No email or phone details are revealed during discovery.")
 
 # --------------------------------------------------
 # PAGE 5: WEBSITE INTELLIGENCE
