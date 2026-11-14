@@ -1,12 +1,20 @@
-from database.company_repository import get_all_companies
-from database.contact_repository import get_company_contacts
 
+import argparse
+from pathlib import Path
+
+import pandas as pd
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_INPUT_FILE = PROJECT_ROOT / "data" / "Quiklee Sales CRM - Leads.csv"
 
 TARGET_DESIGNATIONS = [
     "Founder",
     "Co-Founder",
     "CEO",
+    "Chief Executive Officer",
     "Chief Operating Officer",
+    "COO",
     "Head of Operations",
     "Operations Manager",
     "Head of E-commerce",
@@ -16,65 +24,185 @@ TARGET_DESIGNATIONS = [
     "Business Development Manager"
 ]
 
+COLUMN_MAPPING = {
+    "company_name": "Brand Name",
+    "website_url": "Website",
+    "contact_name": "Full Name",
+    "designation": "Role",
+    "phone": "Contact info ",
+    "email": "Email "
+}
 
-def needs_enrichment(company_id):
+
+def clean_value(value):
+    """Convert missing or whitespace-only values to an empty string."""
+
+    if pd.isna(value):
+        return ""
+
+    return str(value).strip()
+
+
+def load_company_dataset(file_path):
+    """Load the existing CRM dataset without modifying its original columns."""
+
+    file_path = Path(file_path)
+
+    if not file_path.exists():
+        raise FileNotFoundError(
+            f"Dataset not found: {file_path}\n"
+            "Place the CSV inside the project's data folder."
+        )
+
+    if file_path.suffix.lower() != ".csv":
+        raise ValueError("Currently, only CSV files are supported.")
+
+    dataframe = pd.read_csv(file_path)
+
+    required_columns = [
+        "Brand Name",
+        "Website",
+        "Full Name",
+        "Role",
+        "Contact info ",
+        "Email "
+    ]
+
+    missing_columns = [
+        column
+        for column in required_columns
+        if column not in dataframe.columns
+    ]
+
+    if missing_columns:
+        raise ValueError(
+            f"Required columns missing from dataset: {missing_columns}"
+        )
+
+    return dataframe
+
+
+def needs_enrichment(company):
     """
-    Check whether a company already has contact information.
+    Return True if any important contact information is missing.
+
+    Existing contact details are retained and are not overwritten here.
     """
 
-    contacts = get_company_contacts(company_id)
+    website = clean_value(company.get("website_url"))
+    phone = clean_value(company.get("phone"))
+    email = clean_value(company.get("email"))
 
-    if contacts:
-        return False
-
-    return True
+    return not website or not phone or not email
 
 
-def prepare_enrichment_queue():
+def prepare_enrichment_queue(dataframe):
     """
-    Identify companies that need contact enrichment.
-    """
+    Prepare a queue containing companies with missing information.
 
-    companies = get_all_companies()
+    Every original CRM row is preserved. Duplicate brand names are
+    not removed because they may represent separate CRM leads.
+    """
 
     enrichment_queue = []
 
-    for company in companies:
+    for row_index, row in dataframe.iterrows():
 
-        company_id = company["id"]
+        company = {
+            "row_index": int(row_index),
+            "company_name": clean_value(row.get("Brand Name")),
+            "website_url": clean_value(row.get("Website")),
+            "contact_name": clean_value(row.get("Full Name")),
+            "designation": clean_value(row.get("Role")),
+            "phone": clean_value(row.get("Contact info ")),
+            "email": clean_value(row.get("Email ")),
+            "target_designations": TARGET_DESIGNATIONS
+        }
 
-        if not needs_enrichment(company_id):
-
-            print(
-                f"Skipping {company['company_name']}: "
-                "contact already exists."
-            )
+        if not company["company_name"]:
             continue
 
-        enrichment_queue.append({
-            "company_id": company_id,
-            "company_name": company["company_name"],
-            "website_url": company["website_url"],
-            "target_designations": TARGET_DESIGNATIONS
-        })
+        if needs_enrichment(company):
+            enrichment_queue.append(company)
 
     return enrichment_queue
 
 
+def print_queue_summary(dataframe, enrichment_queue):
+    """Display dataset and enrichment queue statistics."""
+
+    total = len(dataframe)
+    queued = len(enrichment_queue)
+
+    website_missing = sum(
+        not clean_value(value)
+        for value in dataframe["Website"]
+    )
+
+    email_missing = sum(
+        not clean_value(value)
+        for value in dataframe["Email "]
+    )
+
+    phone_missing = sum(
+        not clean_value(value)
+        for value in dataframe["Contact info "]
+    )
+
+    print("\nQUIKLEE CONTACT ENRICHMENT")
+    print("=" * 50)
+
+    print(f"Total CRM records       : {total}")
+    print(f"Records requiring work  : {queued}")
+    print(f"Records with complete website, phone and email: {total - queued}")
+
+    print("\nMISSING INFORMATION")
+    print("-" * 50)
+    print(f"Missing websites        : {website_missing}")
+    print(f"Missing phone numbers   : {phone_missing}")
+    print(f"Missing email addresses : {email_missing}")
+
+    print("\nENRICHMENT QUEUE")
+    print("-" * 50)
+
+    for company in enrichment_queue[:15]:
+
+        print(f"\nCompany: {company['company_name']}")
+        print(f"Website: {company['website_url'] or 'Missing'}")
+        print(f"Contact: {company['contact_name'] or 'Missing'}")
+        print(f"Phone  : {company['phone'] or 'Missing'}")
+        print(f"Email  : {company['email'] or 'Missing'}")
+
+    if queued > 15:
+        print(f"\n... and {queued - 15} more records.")
+
+    print("\nQueue preparation completed.")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Prepare Quiklee CRM contact enrichment queue."
+    )
+
+    parser.add_argument(
+        "--input",
+        default=str(DEFAULT_INPUT_FILE),
+        help="Path to the CRM CSV file."
+    )
+
+    args = parser.parse_args()
+
+    try:
+        dataframe = load_company_dataset(args.input)
+
+        enrichment_queue = prepare_enrichment_queue(dataframe)
+
+        print_queue_summary(dataframe, enrichment_queue)
+
+    except Exception as error:
+        print(f"\nERROR: {error}")
+        raise SystemExit(1)
+
+
 if __name__ == "__main__":
-
-    print("\nCONTACT ENRICHMENT WORKFLOW")
-    print("-" * 40)
-
-    queue = prepare_enrichment_queue()
-
-    print(f"\nCompanies requiring enrichment: {len(queue)}")
-
-    for company in queue:
-
-        print("\nCompany:", company["company_name"])
-        print("Website:", company["website_url"])
-        print("Target roles:")
-
-        for designation in company["target_designations"]:
-            print("-", designation)
+    main()

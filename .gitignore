@@ -1,16 +1,65 @@
-# Environment
-.venv/
+﻿# ==============================
+# ENVIRONMENT & SECRETS
+# ==============================
 .env
+.env.*
+!.env.example
+.venv/
+venv/
+venv*/
+config/google_credentials.json
+*.pem
+*.key
 
-# Python cache
+# ==============================
+# PYTHON CACHE
+# ==============================
 __pycache__/
 *.py[cod]
+*.pyo
 
-# Database
+# ==============================
+# DATABASE & LOCAL STORAGE
+# ==============================
 *.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
 
-# API credentials
-config/google_credentials.json
+# ==============================
+# PRIVATE DATA
+# ==============================
+data/*
+!data/demo_companies.csv
 
-# IDE
+# ==============================
+# GENERATED REPORTS
+# ==============================
+reports/
+*.xlsx
+*.xls
+*.pdf
+
+# ==============================
+# BACKUPS
+# ==============================
+*.backup
+*.backup_*
+*.bak
+*backup*.py
+
+# ==============================
+# IDE & SYSTEM
+# ==============================
 .vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ==============================
+# LOGS & TEMPORARY FILES
+# ==============================
+*.log
+*.tmp
+*.temp

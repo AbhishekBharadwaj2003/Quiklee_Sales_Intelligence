@@ -3,17 +3,17 @@ from typing import Optional, Dict
 
 
 def estimate_monthly_orders(
-    monthly_visits: int,
+    monthly_visits: Optional[int],
     conversion_rate_min: float = 0.01,
     conversion_rate_max: float = 0.03
 ) -> Dict:
-    """
-    Estimate monthly orders using website traffic
-    and an assumed conversion-rate range.
 
-    Conversion rates must be supplied as decimals.
-    Example: 0.02 = 2%.
-    """
+    if monthly_visits is None:
+        return {
+            "estimated_monthly_orders_min": None,
+            "estimated_monthly_orders_max": None,
+            "status": "traffic data unavailable"
+        }
 
     if monthly_visits < 0:
         raise ValueError("Monthly visits cannot be negative.")
@@ -23,13 +23,8 @@ def estimate_monthly_orders(
     ):
         raise ValueError("Invalid conversion rate range.")
 
-    min_orders = round(
-        monthly_visits * conversion_rate_min
-    )
-
-    max_orders = round(
-        monthly_visits * conversion_rate_max
-    )
+    min_orders = round(monthly_visits * conversion_rate_min)
+    max_orders = round(monthly_visits * conversion_rate_max)
 
     return {
         "estimated_monthly_orders_min": min_orders,
@@ -37,18 +32,23 @@ def estimate_monthly_orders(
         "conversion_rate_min": conversion_rate_min,
         "conversion_rate_max": conversion_rate_max,
         "estimation_method": "Traffic x assumed conversion rate",
-        "data_type": "estimated"
+        "data_type": "estimated",
+        "status": "estimated"
     }
 
 
 def estimate_monthly_revenue(
-    monthly_orders_min: int,
-    monthly_orders_max: int,
+    monthly_orders_min: Optional[int],
+    monthly_orders_max: Optional[int],
     aov: Optional[float] = None
 ) -> Dict:
-    """
-    Estimate revenue only when an AOV is available.
-    """
+
+    if monthly_orders_min is None or monthly_orders_max is None:
+        return {
+            "estimated_revenue_min": None,
+            "estimated_revenue_max": None,
+            "status": "order data unavailable"
+        }
 
     if aov is None:
         return {
@@ -61,12 +61,8 @@ def estimate_monthly_revenue(
         raise ValueError("AOV cannot be negative.")
 
     return {
-        "estimated_revenue_min": round(
-            monthly_orders_min * aov
-        ),
-        "estimated_revenue_max": round(
-            monthly_orders_max * aov
-        ),
+        "estimated_revenue_min": round(monthly_orders_min * aov),
+        "estimated_revenue_max": round(monthly_orders_max * aov),
         "aov_used": aov,
         "currency": "INR",
         "status": "estimated"
@@ -74,13 +70,17 @@ def estimate_monthly_revenue(
 
 
 def estimate_cod_orders(
-    monthly_orders_min: int,
-    monthly_orders_max: int,
+    monthly_orders_min: Optional[int],
+    monthly_orders_max: Optional[int],
     cod_share: Optional[float] = None
 ) -> Dict:
-    """
-    Estimate COD orders only when a COD share is available.
-    """
+
+    if monthly_orders_min is None or monthly_orders_max is None:
+        return {
+            "estimated_cod_orders_min": None,
+            "estimated_cod_orders_max": None,
+            "status": "order data unavailable"
+        }
 
     if cod_share is None:
         return {
@@ -93,27 +93,20 @@ def estimate_cod_orders(
         raise ValueError("COD share must be between 0 and 1.")
 
     return {
-        "estimated_cod_orders_min": round(
-            monthly_orders_min * cod_share
-        ),
-        "estimated_cod_orders_max": round(
-            monthly_orders_max * cod_share
-        ),
+        "estimated_cod_orders_min": round(monthly_orders_min * cod_share),
+        "estimated_cod_orders_max": round(monthly_orders_max * cod_share),
         "cod_share_used": cod_share,
         "status": "estimated"
     }
 
 
 def calculate_business_metrics(
-    monthly_visits: int,
+    monthly_visits: Optional[int],
     aov: Optional[float] = None,
     cod_share: Optional[float] = None,
     conversion_rate_min: float = 0.01,
     conversion_rate_max: float = 0.03
 ) -> Dict:
-    """
-    Calculate available business metrics for a company.
-    """
 
     orders = estimate_monthly_orders(
         monthly_visits,
@@ -122,14 +115,14 @@ def calculate_business_metrics(
     )
 
     revenue = estimate_monthly_revenue(
-        orders["estimated_monthly_orders_min"],
-        orders["estimated_monthly_orders_max"],
+        orders.get("estimated_monthly_orders_min"),
+        orders.get("estimated_monthly_orders_max"),
         aov
     )
 
     cod = estimate_cod_orders(
-        orders["estimated_monthly_orders_min"],
-        orders["estimated_monthly_orders_max"],
+        orders.get("estimated_monthly_orders_min"),
+        orders.get("estimated_monthly_orders_max"),
         cod_share
     )
 
@@ -138,10 +131,15 @@ def calculate_business_metrics(
         **orders,
         **revenue,
         **cod,
-        "overall_data_type": "estimated",
+        "overall_data_type": (
+            "estimated" if monthly_visits is not None else "unavailable"
+        ),
         "note": (
-            "These figures are estimates, not verified "
-            "company financial or shipment records."
+            "Orders are estimates based on an assumed conversion rate. "
+            "Revenue and COD orders require their respective inputs."
+            if monthly_visits is not None
+            else "Traffic data is unavailable. No orders, revenue, or COD "
+                 "figures have been fabricated."
         )
     }
 
@@ -151,13 +149,10 @@ if __name__ == "__main__":
     print("\nQUIKLEE BUSINESS METRICS ENGINE")
     print("=" * 55)
 
-    # Illustrative inputs only, not actual company data.
     result = calculate_business_metrics(
-        monthly_visits=500000,
-        aov=1200,
-        cod_share=None,
-        conversion_rate_min=0.01,
-        conversion_rate_max=0.03
+        monthly_visits=None,
+        aov=None,
+        cod_share=None
     )
 
     for key, value in result.items():

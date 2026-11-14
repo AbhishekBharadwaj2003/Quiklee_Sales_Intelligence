@@ -4,6 +4,7 @@ from discovery.brave_search import BraveSearchClient
 from discovery.company_extractor import extract_company_candidates
 from discovery.company_validator import validate_company
 from discovery.deduplication import deduplicate_candidates
+from discovery.demo_discovery import run_demo_discovery
 
 from database.company_repository import (
     add_company,
@@ -16,22 +17,51 @@ def run_discovery(
     categories,
     queries_per_category=2,
     results_per_query=10,
-    max_validations=20
+    max_validations=20,
+    mode="live"
 ):
-    """Run discovery, deduplication, validation and database storage."""
+    """
+    Run company discovery.
+
+    Demo Mode:
+        Uses the local demo CSV without calling Brave Search.
+
+    Live Mode:
+        Uses Brave Search to discover new companies.
+    """
+
+    mode = mode.lower().strip()
+
+    if mode not in {"demo", "live"}:
+        raise ValueError("Mode must be either 'demo' or 'live'.")
 
     print("\nQUIKLEE DISCOVERY ENGINE")
     print("=" * 55)
+    print(f"Discovery mode: {mode.upper()}")
 
-    # STEP 1: Load previously stored companies
+    # DEMO MODE
+    if mode == "demo":
+
+        print("\nUsing local demo dataset.")
+        print("Brave Search will not be called.")
+
+        return run_demo_discovery(
+            max_validations=max_validations
+        )
+
+    # LIVE MODE
+    print("\nStarting live company discovery...")
+
+    # STEP 1: Load existing companies
     existing_records = get_all_companies()
 
     print(f"Existing database records: {len(existing_records)}")
 
+    # STEP 2: Initialize Brave Search
     client = BraveSearchClient()
     all_candidates = []
 
-    # STEP 2: Discover companies
+    # STEP 3: Discover companies
     for category in categories:
 
         print(f"\nSearching category: {category}")
@@ -55,7 +85,7 @@ def run_discovery(
 
             all_candidates.extend(candidates)
 
-    # STEP 3: Deduplicate against existing database records
+    # STEP 4: Deduplicate
     unique, duplicates = deduplicate_candidates(
         all_candidates,
         existing_records
@@ -67,7 +97,7 @@ def run_discovery(
     print(f"New unique companies: {len(unique)}")
     print(f"Duplicates skipped: {len(duplicates)}")
 
-    # STEP 4: Save all new candidates in SQLite
+    # STEP 5: Save new companies
     saved_records = []
 
     for candidate in unique:
@@ -80,6 +110,7 @@ def run_discovery(
         result = add_company(record)
 
         if result["success"]:
+
             saved_records.append({
                 "company_id": result["company_id"],
                 "candidate": candidate
@@ -87,7 +118,7 @@ def run_discovery(
 
     print(f"\nNew companies saved: {len(saved_records)}")
 
-    # STEP 5: Validate a limited number of saved companies
+    # STEP 6: Validate saved companies
     validated_companies = []
 
     for record in saved_records[:max_validations]:
@@ -100,22 +131,55 @@ def run_discovery(
             f"{candidate['company_name_candidate']}"
         )
 
-        result = validate_company(candidate)
+        try:
 
-        update_company(
-            company_id,
-            {
-                "validation_status": result["validation_status"],
-                "description": result.get("website_description", "")
-            }
-        )
+            result = validate_company(candidate)
 
-        validated_companies.append({
-            "company_id": company_id,
-            **result
-        })
+            validation_status = result["validation_status"]
 
-        print(f"Status: {result['validation_status']}")
+            update_company(
+                company_id,
+                {
+                    "validation_status": validation_status,
+                    "description": result.get(
+                        "website_description",
+                        candidate.get("description", "")
+                    )
+                }
+            )
+
+            validated_companies.append({
+                "company_id": company_id,
+                "company_name": candidate["company_name_candidate"],
+                "website_url": candidate["website_url"],
+                "validation_status": validation_status
+            })
+
+            print(f"Status: {validation_status}")
+
+        except Exception as error:
+
+            update_company(
+                company_id,
+                {
+                    "validation_status": "unreachable"
+                }
+            )
+
+            print(f"Validation failed: {error}")
+
+    pending_validation = max(
+        0,
+        len(saved_records) - len(validated_companies)
+    )
+
+    print("\nLIVE DISCOVERY SUMMARY")
+    print("=" * 55)
+    print("Candidates found:", len(all_candidates))
+    print("Unique candidates:", len(unique))
+    print("New companies saved:", len(saved_records))
+    print("Companies validated:", len(validated_companies))
+    print("Pending validation:", pending_validation)
 
     return {
         "total_candidates": len(all_candidates),
@@ -123,10 +187,7 @@ def run_discovery(
         "duplicates": duplicates,
         "saved_records": len(saved_records),
         "validated_companies": validated_companies,
-        "pending_validation": max(
-            0,
-            len(saved_records) - len(validated_companies)
-        )
+        "pending_validation": pending_validation
     }
 
 
@@ -143,14 +204,19 @@ if __name__ == "__main__":
             categories=categories,
             queries_per_category=2,
             results_per_query=5,
-            max_validations=5
+            max_validations=5,
+            mode="demo"
         )
 
         print("\nFINAL PIPELINE SUMMARY")
         print("=" * 55)
 
         for key, value in results.items():
-            print(f"{key}: {value if key != 'duplicates' else len(value)}")
+
+            if key == "duplicates":
+                value = len(value)
+
+            print(f"{key}: {value}")
 
     except (ValueError, RuntimeError) as error:
         print(f"\nPipeline error: {error}")

@@ -45,7 +45,10 @@ class BraveSearchClient:
                 timeout=20
             )
 
-            response.raise_for_status()
+            if not response.ok:
+                print("Brave API Status:", response.status_code)
+                print("Brave API Error:", response.text)
+                response.raise_for_status()
 
             data = response.json()
 

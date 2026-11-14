@@ -10,6 +10,7 @@ PROJECT_NAME = "Quiklee Sales Intelligence"
 BRAVE_API_KEY = os.getenv("BRAVE_API_KEY")
 LUSHA_API_KEY = os.getenv("LUSHA_API_KEY")
 SIMILARWEB_API_KEY = os.getenv("SIMILARWEB_API_KEY")
+TABAPI_API_KEY = os.getenv("TABAPI_API_KEY")
 
 # Discovery configuration
 TARGET_COUNTRY = "India"
