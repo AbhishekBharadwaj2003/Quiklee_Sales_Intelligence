@@ -123,3 +123,13 @@ def build_campaign_report(campaign_id):
         pd.DataFrame([dict(row) for row in contacts]).to_excel(writer, sheet_name='Contact Intelligence', index=False)
     output.seek(0)
     return output.getvalue()
+
+
+def reset_campaign_traffic_to_pending(campaign_id):
+    """Clear imported/unverified traffic values so TabAPI can validate them."""
+    with get_db() as connection:
+        cursor = connection.execute(
+            "UPDATE campaign_records SET monthly_visits=NULL, traffic_status='pending' WHERE campaign_id=?",
+            (campaign_id,),
+        )
+        return cursor.rowcount
