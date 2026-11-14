@@ -1108,9 +1108,12 @@ elif page == "Campaign Management":
             st.json(research_plan)
 
             col1, col2, col3 = st.columns(3)
-            col1.metric("Ready for research", plan_summary["ready_for_research"])
+            col1.metric("Ready / retry", plan_summary["ready_for_research"] + plan_summary.get("ready_for_retry", 0))
             col2.metric("Already completed", plan_summary["already_completed"])
             col3.metric("Blocked by traffic", plan_summary["blocked_by_traffic"])
+
+            if plan_summary.get("ready_for_retry", 0):
+                st.info(str(plan_summary["ready_for_retry"]) + " partially researched/failed company record(s) can be retried after approval.")
 
             refresh_tabapi = st.checkbox(
                 "Refresh monthly traffic from TabAPI (may consume credits)",
@@ -1126,7 +1129,7 @@ elif page == "Campaign Management":
             if st.button(
                 "Run Live Research",
                 type="primary",
-                disabled=not approve_live or plan_summary["ready_for_research"] == 0,
+                disabled=not approve_live or (plan_summary["ready_for_research"] + plan_summary.get("ready_for_retry", 0) == 0),
                 key=f"run_live_research_{selected_campaign['id']}",
             ):
                 with st.spinner("Running approved company research..."):
@@ -1143,7 +1146,7 @@ elif page == "Campaign Management":
                 st.json(live_result)
                 st.rerun()
 
-            if plan_summary["ready_for_research"] == 0:
+            if (plan_summary["ready_for_research"] + plan_summary.get("ready_for_retry", 0)) == 0:
                 st.warning(
                     "There are no companies currently marked ready for research. "
                     "Check the traffic eligibility status and research queue first."
