@@ -469,43 +469,29 @@ elif page == "Lead Prioritisation":
 elif page == "Contact Intelligence":
 
     st.title("CONTACT INTELLIGENCE")
-    st.caption("Discover relevant decision-makers for qualified companies using Lusha.")
-
+    st.caption("Select a prioritised company, discover decision-makers, then reveal selected contact fields with separate approval.")
     companies = get_all_companies()
-    if not companies:
-        st.info("No companies are available yet. Upload a campaign and link its companies first.")
+    companies = sorted(companies, key=lambda item: (item.get("qualification_score") is None, -(item.get("qualification_score") or 0)))
+    scored_companies = [item for item in companies if item.get("qualification_score") is not None]
+    if not scored_companies:
+        st.info("No scored companies yet. Complete TabAPI validation and lead scoring first.")
     else:
-        company = st.selectbox(
-            "Select company",
-            companies,
-            format_func=lambda item: f"{item['company_name']} — {item.get('website_url') or 'website missing'}",
-            key="lusha_company_selector",
-        )
-        if company.get("qualification_score") is not None:
-            st.metric("Lead score", f"{company['qualification_score']:.2f}")
-        render_lusha_discovery_ui(
-            FILES["lusha"],
-            company["id"],
-            company["company_name"],
-            company.get("website_url"),
-        )
-
+        company = st.selectbox("Select prioritised company", scored_companies, format_func=lambda item: item["company_name"] + " — " + str(round(item["qualification_score"], 2)), key="lusha_company_selector")
+        st.metric("Lead score", f"{company['qualification_score']:.2f}")
+        st.caption("Prospecting search may be restricted by your Lusha API subscription. Email and phone reveals are separate API operations.")
+        render_lusha_discovery_ui(FILES["lusha"], company["id"], company["company_name"], company.get("website_url"))
         st.divider()
-        st.subheader("Saved contact records")
+        st.subheader("Saved contact records and approved reveals")
         if FILES["lusha"].exists():
             saved_contacts = pd.read_csv(FILES["lusha"], dtype=str).fillna("")
-            if "company_domain" in saved_contacts.columns:
-                domain = str(company.get("domain") or "").lower()
-                saved_contacts = saved_contacts[saved_contacts["company_domain"].str.lower().str.contains(domain, na=False)] if domain else saved_contacts.iloc[0:0]
-            display_columns = [col for col in ["contact_name", "designation", "company_name", "linkedin_url", "enrichment_status"] if col in saved_contacts.columns]
-            if not saved_contacts.empty and display_columns:
-                display_table(saved_contacts[display_columns], 400)
+            if not saved_contacts.empty:
+                display_cols = [col for col in ["contact_name", "designation", "company_name", "linkedin_url", "lusha_contact_id", "enrichment_status"] if col in saved_contacts.columns]
+                display_table(saved_contacts[display_cols], 350)
+                render_lusha_reveal_ui(FILES["lusha"])
             else:
-                st.info("No discovered contacts saved for this company yet.")
+                st.info("No contact records saved yet.")
         else:
-            st.info("No Lusha prospecting results saved yet.")
-
-        st.caption("Prospecting search and email/phone reveal are separate operations. No email or phone details are revealed during discovery.")
+            st.info("No contact records saved yet. Lusha prospecting access may need to be enabled for your API account.")
 
 # --------------------------------------------------
 # PAGE 5: WEBSITE INTELLIGENCE
@@ -1127,41 +1113,29 @@ elif page == "Campaign Management":
 elif page == "Reports":
 
     st.title("REPORT CENTRE")
-    st.caption("Download generated project reports.")
-
+    st.caption("Generate and download campaign intelligence reports.")
+    report_campaigns = get_all_campaigns()
+    if report_campaigns:
+        report_campaign = st.selectbox("Select campaign for report", report_campaigns, format_func=lambda item: "#" + str(item["id"]) + " - " + item["campaign_name"], key="report_campaign_selector")
+        if st.button("Generate campaign Excel report", type="primary", key="generate_campaign_report"):
+            try:
+                report_bytes = build_campaign_report(report_campaign["id"])
+                st.session_state["generated_campaign_report"] = report_bytes
+                st.session_state["generated_campaign_report_name"] = "Quiklee_Campaign_" + str(report_campaign["id"]) + "_Intelligence.xlsx"
+                st.success("Campaign report generated.")
+            except Exception as error:
+                st.error("Report generation failed: " + str(error))
+        if st.session_state.get("generated_campaign_report"):
+            st.download_button("Download campaign report", st.session_state["generated_campaign_report"], file_name=st.session_state["generated_campaign_report_name"], mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    else:
+        st.info("Create a campaign before generating reports.")
+    st.divider()
     for report_name, report_path in REPORTS.items():
-
-        st.subheader(report_name)
-
         if report_path.exists():
-
             with open(report_path, "rb") as file:
                 report_bytes = file.read()
-
-            st.download_button(
-                label=f"Download {report_name}",
-                data=report_bytes,
-                file_name=report_path.name,
-                mime=(
-                    "application/vnd.openxmlformats-officedocument."
-                    "spreadsheetml.sheet"
-                ),
-                key=f"download_{report_name}",
-            )
-
-            st.caption(
-                f"Last modified: "
-                f"{pd.Timestamp(report_path.stat().st_mtime, unit='s')}"
-            )
-
-        else:
-
-            st.warning(
-                f"Report not generated yet: {report_path.name}"
-            )
-
-        st.divider()
-
+            st.download_button(label="Download " + report_name, data=report_bytes, file_name=report_path.name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="download_" + report_name)
+        
 
 # --------------------------------------------------
 # FOOTER
