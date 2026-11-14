@@ -47,22 +47,29 @@ def normalize_domain(value):
 
 
 def parse_visitor_count(value):
-    """Convert a visitor count into a numeric value."""
+    """Convert visitor counts such as 1.01M, 250K or 100,000 into numbers."""
 
     if value is None or pd.isna(value):
         return None
 
-    cleaned = re.sub(r"[,\s]", "", str(value).strip())
+    cleaned = re.sub(r"[,\\s]", "", str(value).strip()).upper()
 
     if not cleaned:
         return None
 
+    multiplier = 1
+    if cleaned.endswith("M"):
+        multiplier = 1_000_000
+        cleaned = cleaned[:-1]
+    elif cleaned.endswith("K"):
+        multiplier = 1_000
+        cleaned = cleaned[:-1]
+
     try:
-        number = float(cleaned)
+        number = float(cleaned) * multiplier
         return number if number >= 0 else None
     except (ValueError, TypeError):
         return None
-
 
 def load_existing_traffic():
     """
