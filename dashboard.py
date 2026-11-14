@@ -1037,7 +1037,6 @@ elif page == "Campaign Management":
             if batch_result["results"]:
                 st.dataframe(pd.DataFrame(batch_result["results"]), use_container_width=True, hide_index=True)
             st.success(str(batch_result["processed_this_batch"]) + " companies processed in this batch. " + str(batch_result["remaining"]) + " companies remain.")
-            st.rerun()
         st.caption("Only companies without a completed traffic status are included in the next batch. Qualified, below-threshold and manual-review records are skipped.")
 
         st.subheader("8. Calculate lead scores")
