@@ -172,8 +172,9 @@ def create_campaign(
     if traffic_column and traffic_column not in dataframe.columns:
         traffic_column = None
 
-    domain_lookup, brand_lookup = load_existing_traffic()
-
+    # Campaign uploads are source estimates only. Never treat uploaded
+    # visitor figures or an older local traffic CSV as live TabAPI validation.
+    # Preserve every original source column in original_row_json below.
     with get_db() as connection:
 
         cursor = connection.execute(
@@ -200,8 +201,6 @@ def create_campaign(
 
         saved_count = 0
         skipped_count = 0
-        reused_traffic_count = 0
-        uploaded_traffic_count = 0
 
         for source_row_number, (_, row) in enumerate(
             dataframe.iterrows(),
@@ -232,32 +231,10 @@ def create_campaign(
 
             domain = normalize_domain(website)
 
-            # First preference: visitor count supplied in the upload.
+            # Do not use estimated visitors supplied in the spreadsheet
+            # as verified traffic. TabAPI must populate these fields later.
             monthly_visitors = None
-
-            if traffic_column:
-                monthly_visitors = parse_visitor_count(
-                    row.get(traffic_column)
-                )
-
-            if monthly_visitors is not None:
-                uploaded_traffic_count += 1
-
-            else:
-                # Second preference: match existing traffic by domain.
-                traffic_record = (
-                    domain_lookup.get(domain) if domain else None
-                )
-
-                # Fallback: match by normalized brand name.
-                if traffic_record is None:
-                    traffic_record = brand_lookup.get(brand_key)
-
-                if traffic_record is not None:
-                    monthly_visitors = traffic_record["monthly_visits"]
-                    reused_traffic_count += 1
-
-            traffic_status = classify_traffic(monthly_visitors)
+            traffic_status = "pending"
 
             original_row = {}
 
@@ -328,8 +305,8 @@ def create_campaign(
         "total_source_rows": len(dataframe),
         "saved_rows": saved_count,
         "skipped_rows": skipped_count,
-        "uploaded_traffic_rows": uploaded_traffic_count,
-        "reused_traffic_rows": reused_traffic_count,
+        "uploaded_traffic_rows": 0,
+        "reused_traffic_rows": 0,
     }
 
 
