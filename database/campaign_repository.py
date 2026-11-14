@@ -370,3 +370,11 @@ def get_campaign_records(campaign_id):
         ).fetchall()
 
         return [dict(row) for row in rows]
+
+
+
+def delete_campaign(campaign_id):
+    """Delete a campaign and its uploaded row records, preserving shared companies."""
+    with get_db() as connection:
+        cursor = connection.execute("DELETE FROM campaigns WHERE id = ?", (int(campaign_id),))
+        return cursor.rowcount > 0
