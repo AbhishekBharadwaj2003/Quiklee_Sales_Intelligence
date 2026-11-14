@@ -20,7 +20,9 @@ from database.campaign_research_controller import (
     run_campaign_research,
 )
 from database.campaign_linker import link_campaign_companies
+from enrichment.lusha_reveal_ui import render_lusha_reveal_ui
 from enrichment.lusha_discovery_ui import render_lusha_discovery_ui
+from campaign_workflow import run_campaign_traffic_validation, score_campaign_leads, get_campaign_intelligence, build_campaign_report
 
 from database.campaign_repository import (
     create_campaign,
@@ -446,78 +448,19 @@ elif page == "CRM Lead Management":
 elif page == "Lead Prioritisation":
 
     st.title("LEAD PRIORITISATION")
-    st.caption(
-        "Rank companies using traffic, role gaps and data quality."
-    )
-
-    if priority.empty:
-
-        st.warning("Priority dataset is unavailable.")
-
+    st.caption("Rank companies using verified traffic and available research evidence.")
+    campaigns_for_scores = get_all_campaigns()
+    if campaigns_for_scores:
+        chosen_score_campaign = st.selectbox("Select campaign", campaigns_for_scores, format_func=lambda item: "#" + str(item["id"]) + " - " + item["campaign_name"], key="score_campaign_selector")
+        live_scores = get_campaign_intelligence(chosen_score_campaign["id"])
+        if not live_scores.empty:
+            live_scores = live_scores.sort_values("lead_score", ascending=False, na_position="last")
+            display_table(live_scores, 520)
+            st.download_button("Download live lead prioritisation", live_scores.to_csv(index=False).encode("utf-8-sig"), file_name="campaign_" + str(chosen_score_campaign["id"]) + "_lead_prioritisation.csv", mime="text/csv")
+        else:
+            st.info("Run TabAPI validation and lead scoring from Campaign Management first.")
     else:
-
-        df = priority.copy()
-
-        if "priority_rank" in df.columns:
-
-            df["priority_rank"] = numeric_column(
-                df,
-                "priority_rank",
-            )
-
-            df = df.sort_values("priority_rank")
-
-        col1, col2, col3 = st.columns(3)
-
-        for column, tier in zip(
-            [col1, col2, col3],
-            ["A", "B", "C"],
-        ):
-
-            count = (
-                df["priority_tier"].eq(tier).sum()
-                if "priority_tier" in df.columns
-                else 0
-            )
-
-            column.metric(f"Priority {tier} Companies", int(count))
-
-        st.divider()
-
-        if "priority_tier" in df.columns:
-
-            selected_tiers = st.multiselect(
-                "Select priority tiers",
-                ["A", "B", "C"],
-                default=["A", "B", "C"],
-            )
-
-            df = df[
-                df["priority_tier"].isin(selected_tiers)
-            ]
-
-        search = st.text_input("Search company name")
-
-        if search.strip() and "company_name" in df.columns:
-
-            df = df[
-                df["company_name"].str.contains(
-                    search.strip(),
-                    case=False,
-                    na=False,
-                    regex=False,
-                )
-            ]
-
-        display_table(df, 520)
-
-        st.download_button(
-            "Download prioritisation CSV",
-            data=df.to_csv(index=False).encode("utf-8-sig"),
-            file_name="Quiklee_Lead_Prioritisation.csv",
-            mime="text/csv",
-        )
-
+        st.info("Upload a campaign first.")
 
 # --------------------------------------------------
 # PAGE 4: CONTACT INTELLIGENCE
@@ -573,29 +516,22 @@ elif page == "Contact Intelligence":
 elif page == "Website Intelligence":
 
     st.title("WEBSITE INTELLIGENCE")
-    st.caption("Website discovery, verification and traffic enrichment.")
-
-    col1, col2 = st.columns(2)
-
-    col1.metric("Website Verification Records", len(websites))
-    col2.metric("Traffic Enrichment Records", len(traffic))
-
-    st.subheader("Website Verification")
-
-    if not websites.empty:
-        display_table(websites, 400)
+    st.caption("TabAPI monthly visitor validation and website metrics.")
+    website_campaigns = get_all_campaigns()
+    if website_campaigns:
+        selected_website_campaign = st.selectbox("Select campaign", website_campaigns, format_func=lambda item: "#" + str(item["id"]) + " - " + item["campaign_name"], key="website_campaign_selector")
+        website_data = get_campaign_intelligence(selected_website_campaign["id"])
+        if not website_data.empty:
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Companies", len(website_data))
+            col2.metric("Traffic qualified", int((website_data["traffic_status"] == "qualified").sum()))
+            col3.metric("Below threshold", int((website_data["traffic_status"] == "below_threshold").sum()))
+            display_table(website_data, 520)
+            st.download_button("Download website intelligence", website_data.to_csv(index=False).encode("utf-8-sig"), file_name="campaign_" + str(selected_website_campaign["id"]) + "_website_intelligence.csv", mime="text/csv")
+        else:
+            st.info("No linked company results yet.")
     else:
-        st.info("No website verification data available.")
-
-    st.divider()
-
-    st.subheader("Traffic Intelligence")
-
-    if not traffic.empty:
-        display_table(traffic, 400)
-    else:
-        st.info("No traffic enrichment records available.")
-
+        st.info("Upload and approve a campaign first.")
 
 # --------------------------------------------------
 # PAGE 6: CAMPAIGN MANAGEMENT
@@ -745,10 +681,13 @@ elif page == "Campaign Management":
                     "will be preserved."
                 )
 
+                approve_campaign_upload = st.checkbox("I approve importing this dataset and linking its company records.", key="approve_campaign_upload")
+
                 if st.button(
                     "Create Campaign",
                     type="primary",
                     use_container_width=True,
+                    disabled=not approve_campaign_upload,
                 ):
 
                     if not campaign_name.strip():
@@ -1095,7 +1034,24 @@ elif page == "Campaign Management":
 
 
         st.divider()
-        st.subheader("7. Live Research")
+        st.subheader("7. Validate website traffic with TabAPI")
+        st.caption("One TabAPI lookup per unique company. This may consume API credits.")
+        approve_tabapi = st.checkbox("I approve TabAPI traffic lookups for this campaign.", key="approve_tabapi_" + str(selected_campaign["id"]))
+        if st.button("Validate monthly visitors", type="primary", disabled=not approve_tabapi, key="validate_tabapi_" + str(selected_campaign["id"])):
+            with st.spinner("Checking monthly website visitors with TabAPI..."):
+                traffic_results = run_campaign_traffic_validation(selected_campaign["id"])
+            st.dataframe(pd.DataFrame(traffic_results), use_container_width=True, hide_index=True)
+            st.success("Traffic validation finished. Review the saved results in Website Intelligence.")
+            st.rerun()
+
+        st.subheader("8. Calculate lead scores")
+        if st.button("Score qualified companies", key="score_campaign_" + str(selected_campaign["id"])):
+            score_results = score_campaign_leads(selected_campaign["id"])
+            st.dataframe(pd.DataFrame(score_results), use_container_width=True, hide_index=True)
+            st.success("Lead scoring completed for eligible companies.")
+            st.rerun()
+
+        st.subheader("9. Live Research")
 
         st.caption(
             "Review the plan first. Live execution only starts after explicit "
