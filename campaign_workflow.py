@@ -6,6 +6,8 @@ from database.company_repository import get_company_by_id, update_company
 from database.research_repository import add_research_record
 from research.traffic_analysis import analyse_traffic
 from qualification.qualification_pipeline import qualify_company
+from research.research_pipeline import run_company_research
+from database.research_repository import get_company_research_history
 
 TRAFFIC_THRESHOLD = 100000
 
@@ -49,13 +51,28 @@ def score_campaign_leads(campaign_id):
     with get_db() as connection:
         rows = connection.execute("SELECT DISTINCT company_id FROM campaign_records WHERE campaign_id=? AND company_id IS NOT NULL", (campaign_id,)).fetchall()
     results = []
+    from database.campaign_research_queue import get_campaign_research_queue
+    queue = {item["company_id"]: item for item in get_campaign_research_queue(campaign_id)}
     for row in rows:
-        company_id = row['company_id']
+        company_id = row["company_id"]
         try:
+            entry = queue.get(company_id, {})
+            if entry.get("traffic_status") != "qualified":
+                results.append({"company_id": company_id, "qualification_status": "not_scored", "error": "Traffic is not qualified."})
+                continue
+            history = get_company_research_history(company_id)
+            has_website_research = any(item.get("research_type") == "website_research" for item in history)
+            if not has_website_research:
+                run_company_research(
+                    company_id=company_id,
+                    mode="live",
+                    monthly_visits_override=entry.get("monthly_visits"),
+                    skip_traffic_api=True,
+                )
             result = qualify_company(company_id, campaign_id=campaign_id)
             results.append(result)
-        except ValueError as error:
-            results.append({'company_id': company_id, 'qualification_status': 'not_scored', 'error': str(error)})
+        except Exception as error:
+            results.append({"company_id": company_id, "qualification_status": "not_scored", "error": str(error)})
     return results
 
 
