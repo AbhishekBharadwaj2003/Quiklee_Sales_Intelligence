@@ -1030,13 +1030,47 @@ elif page == "Campaign Management":
         st.divider()
         st.subheader("7. Validate website traffic with TabAPI")
         st.caption("To keep the app responsive, each click checks a maximum of 10 unique companies. Results are saved, and the next click continues with the next unprocessed companies.")
-        approve_tabapi = st.checkbox("I approve TabAPI traffic lookups for this campaign. Each batch may consume API credits.", key="approve_tabapi_" + str(selected_campaign["id"]))
-        if st.button("Validate next 10 companies", type="primary", disabled=not approve_tabapi, key="validate_tabapi_" + str(selected_campaign["id"])):
-            with st.spinner("Checking up to 10 company websites with TabAPI..."):
-                batch_result = run_campaign_traffic_validation(selected_campaign["id"], batch_size=10)
-            if batch_result["results"]:
-                st.dataframe(pd.DataFrame(batch_result["results"]), use_container_width=True, hide_index=True)
-            st.success(str(batch_result["processed_this_batch"]) + " companies processed in this batch. " + str(batch_result["remaining"]) + " companies remain.")
+        campaign_id = selected_campaign["id"]
+        batch_result_key = "tabapi_batch_result_" + str(campaign_id)
+        batch_error_key = "tabapi_batch_error_" + str(campaign_id)
+        approve_tabapi = st.checkbox(
+            "I approve TabAPI traffic lookups for this campaign. Each batch may consume API credits.",
+            key="approve_tabapi_" + str(campaign_id),
+        )
+        if st.button(
+            "Validate next 10 companies",
+            type="primary",
+            disabled=not approve_tabapi,
+            key="validate_tabapi_" + str(campaign_id),
+        ):
+            st.session_state.pop(batch_result_key, None)
+            st.session_state.pop(batch_error_key, None)
+            try:
+                with st.spinner("Checking up to 10 company websites with TabAPI..."):
+                    st.session_state[batch_result_key] = run_campaign_traffic_validation(
+                        campaign_id, batch_size=10
+                    )
+            except Exception as error:
+                st.session_state[batch_error_key] = (
+                    type(error).__name__ + ": " + str(error)
+                )
+
+        if st.session_state.get(batch_error_key):
+            st.error("TabAPI batch failed: " + st.session_state[batch_error_key])
+        saved_batch_result = st.session_state.get(batch_result_key)
+        if saved_batch_result:
+            st.success(
+                str(saved_batch_result.get("processed_this_batch", 0))
+                + " companies processed in this batch. "
+                + str(saved_batch_result.get("remaining", 0))
+                + " companies remain."
+            )
+            if saved_batch_result.get("results"):
+                st.dataframe(
+                    pd.DataFrame(saved_batch_result["results"]),
+                    use_container_width=True,
+                    hide_index=True,
+                )
         st.caption("Only companies without a completed traffic status are included in the next batch. Qualified, below-threshold and manual-review records are skipped.")
 
         st.subheader("8. Calculate lead scores")
@@ -1081,25 +1115,11 @@ elif page == "Campaign Management":
                 key=f"approve_live_research_{selected_campaign['id']}",
             )
 
-            if st.button(
-                "Run Live Research",
-                type="primary",
-                disabled=not approve_live or (plan_summary["ready_for_research"] + plan_summary.get("ready_for_retry", 0) == 0),
-                key=f"run_live_research_{selected_campaign['id']}",
-            ):
-                with st.spinner("Running approved company research..."):
-                    live_result = run_campaign_research(
-                        selected_campaign["id"],
-                        execute=True,
-                        confirm_external_calls=True,
-                        refresh_traffic_api=refresh_tabapi,
-                    )
-                st.success(
-                    f"Research finished. Attempted "
-                    f"{live_result.get('companies_attempted', 0)} companies."
-                )
-                st.json(live_result)
-                st.rerun()
+            st.info(
+                "Bulk Live Research execution is temporarily disabled. "
+                "Use the controlled 10-company TabAPI batch above first; "
+                "this prevents an accidental all-company API run."
+            )
 
             if (plan_summary["ready_for_research"] + plan_summary.get("ready_for_retry", 0)) == 0:
                 st.warning(
