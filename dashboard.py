@@ -1029,14 +1029,16 @@ elif page == "Campaign Management":
 
         st.divider()
         st.subheader("7. Validate website traffic with TabAPI")
-        st.caption("One TabAPI lookup per unique company. This may consume API credits.")
-        approve_tabapi = st.checkbox("I approve TabAPI traffic lookups for this campaign.", key="approve_tabapi_" + str(selected_campaign["id"]))
-        if st.button("Validate monthly visitors", type="primary", disabled=not approve_tabapi, key="validate_tabapi_" + str(selected_campaign["id"])):
-            with st.spinner("Checking monthly website visitors with TabAPI..."):
-                traffic_results = run_campaign_traffic_validation(selected_campaign["id"])
-            st.dataframe(pd.DataFrame(traffic_results), use_container_width=True, hide_index=True)
-            st.success("Traffic validation finished. Review the saved results in Website Intelligence.")
+        st.caption("To keep the app responsive, each click checks a maximum of 10 unique companies. Results are saved, and the next click continues with the next unprocessed companies.")
+        approve_tabapi = st.checkbox("I approve TabAPI traffic lookups for this campaign. Each batch may consume API credits.", key="approve_tabapi_" + str(selected_campaign["id"]))
+        if st.button("Validate next 10 companies", type="primary", disabled=not approve_tabapi, key="validate_tabapi_" + str(selected_campaign["id"])):
+            with st.spinner("Checking up to 10 company websites with TabAPI..."):
+                batch_result = run_campaign_traffic_validation(selected_campaign["id"], batch_size=10)
+            if batch_result["results"]:
+                st.dataframe(pd.DataFrame(batch_result["results"]), use_container_width=True, hide_index=True)
+            st.success(str(batch_result["processed_this_batch"]) + " companies processed in this batch. " + str(batch_result["remaining"]) + " companies remain.")
             st.rerun()
+        st.caption("Only companies without a completed traffic status are included in the next batch. Qualified, below-threshold and manual-review records are skipped.")
 
         st.subheader("8. Calculate lead scores")
         if st.button("Score qualified companies", key="score_campaign_" + str(selected_campaign["id"])):
