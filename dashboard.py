@@ -807,43 +807,40 @@ elif page == "Campaign Management":
     if not campaigns:
         st.info("No campaigns created yet. Upload a dataset above to create your first campaign.")
     else:
-        st.caption("Delete demo campaigns using the trash icon. Deleting a campaign removes its uploaded rows; shared company profiles are preserved.")
+        st.caption("Each campaign has its own delete control. Deleting removes that campaign and its uploaded rows, but preserves shared company profiles.")
         for campaign in campaigns:
-            left, middle, right = st.columns([5, 2, 0.7])
-            with left:
-                st.write("**" + str(campaign["campaign_name"]) + "**")
-                st.caption(str(campaign.get("source_filename") or "") + " · " + str(campaign.get("saved_records", 0)) + " records · " + str(campaign.get("status", "")))
-            with middle:
+            row_left, row_meta, row_action = st.columns([5, 3, 1])
+            with row_left:
+                st.markdown("**#" + str(campaign["id"]) + " · " + str(campaign["campaign_name"]) + "**")
+                st.caption(str(campaign.get("source_filename") or "No source filename"))
+            with row_meta:
+                st.caption(str(campaign.get("saved_records", 0)) + " records · " + str(campaign.get("status", "")))
                 st.caption("Created: " + str(campaign.get("created_at") or "—"))
-            with right:
-                if st.button("🗑️", key="delete_campaign_" + str(campaign["id"]), help="Delete this campaign and its uploaded rows"):
+            with row_action:
+                if st.button("🗑️ Delete", key="delete_campaign_" + str(campaign["id"]), type="secondary", help="Delete this campaign"):
                     st.session_state["pending_campaign_delete"] = campaign["id"]
-                    st.rerun()
 
         pending_delete = st.session_state.get("pending_campaign_delete")
         if pending_delete is not None:
             target = next((item for item in campaigns if item["id"] == pending_delete), None)
             if target:
-                st.warning("Permanently delete campaign '" + str(target["campaign_name"]) + "' and all its uploaded rows? Shared company profiles will be preserved.")
+                st.warning("Confirm permanent deletion of campaign #" + str(target["id"]) + " — " + str(target["campaign_name"]) + ". Its campaign rows will be removed; shared company profiles will remain.")
                 confirm_col, cancel_col = st.columns(2)
                 with confirm_col:
-                    if st.button("Yes, delete campaign", type="primary", key="confirm_delete_campaign"):
+                    if st.button("Confirm delete", type="primary", key="confirm_delete_campaign"):
                         deleted = delete_campaign(pending_delete)
                         st.session_state.pop("pending_campaign_delete", None)
                         if deleted:
-                            st.success("Campaign deleted.")
+                            st.success("Campaign deleted successfully.")
                         st.rerun()
                 with cancel_col:
                     if st.button("Cancel", key="cancel_delete_campaign"):
                         st.session_state.pop("pending_campaign_delete", None)
                         st.rerun()
-
-        campaign_summary = pd.DataFrame(campaigns)
-        summary_columns = [column for column in ["id", "campaign_name", "source_filename", "source_row_count", "saved_records", "status", "created_at"] if column in campaign_summary.columns]
         with st.expander("View campaign summary table"):
-            display_table(campaign_summary[summary_columns], 350)
-
-        st.divider()
+            campaign_summary = pd.DataFrame(campaigns)
+            summary_columns = [column for column in ["id", "campaign_name", "source_filename", "source_row_count", "saved_records", "status", "created_at"] if column in campaign_summary.columns]
+            display_table(campaign_summary[summary_columns], 350)        st.divider()
 
         st.subheader("5. Inspect campaign records")
 
