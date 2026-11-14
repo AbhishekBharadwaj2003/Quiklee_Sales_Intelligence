@@ -197,6 +197,42 @@ def read_uploaded_dataset(uploaded_file):
 # --------------------------------------------------
 
 crm = get_data("crm")
+
+# If the original CRM CSV is not present in the cloud deployment,
+# use the most recently uploaded CRM campaign saved in SQLite.
+if crm.empty:
+    try:
+        saved_campaigns = get_all_campaigns()
+        crm_campaigns = [
+            item for item in saved_campaigns
+            if "crm" in str(item.get("campaign_name", "")).lower()
+            or "crm" in str(item.get("source_filename", "")).lower()
+        ]
+
+        if crm_campaigns:
+            latest_crm_campaign = crm_campaigns[0]
+            saved_rows = get_campaign_records(latest_crm_campaign["id"])
+            reconstructed_rows = []
+
+            for saved_row in saved_rows:
+                try:
+                    original_row = json.loads(
+                        saved_row.get("original_row_json") or "{}"
+                    )
+                except (TypeError, ValueError):
+                    original_row = {}
+
+                if isinstance(original_row, dict):
+                    reconstructed_rows.append(original_row)
+
+            if reconstructed_rows:
+                crm = pd.DataFrame(reconstructed_rows).fillna("")
+    except Exception as error:
+        st.warning(
+            "The uploaded CRM campaign could not be loaded: "
+            f"{type(error).__name__}: {error}"
+        )
+
 priority = get_data("priority")
 lusha = get_data("lusha")
 website_contacts = get_data("website_contacts")
