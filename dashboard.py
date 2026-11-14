@@ -1075,48 +1075,67 @@ elif page == "Campaign Management":
 
 
         st.divider()
-        st.subheader("7. Research Preview")
+        st.subheader("7. Live Research")
 
         st.caption(
-            "This public demonstration supports read-only research "
-            "planning. Live external research and paid API operations "
-            "are disabled."
+            "Review the plan first. Live execution only starts after explicit "
+            "approval. A fresh TabAPI traffic refresh may consume API credits."
         )
 
         try:
             research_plan = build_campaign_research_plan(
                 selected_campaign["id"]
             )
-
             plan_summary = research_plan["summary"]
 
-            st.write("**Dry-run preview**")
+            st.write("**Research plan preview**")
             st.json(research_plan)
 
             col1, col2, col3 = st.columns(3)
+            col1.metric("Ready for research", plan_summary["ready_for_research"])
+            col2.metric("Already completed", plan_summary["already_completed"])
+            col3.metric("Blocked by traffic", plan_summary["blocked_by_traffic"])
 
-            col1.metric(
-                "Companies ready for research",
-                plan_summary["ready_for_research"],
+            refresh_tabapi = st.checkbox(
+                "Refresh monthly traffic from TabAPI (may consume credits)",
+                value=False,
+                key=f"tabapi_refresh_{selected_campaign['id']}",
             )
-            col2.metric(
-                "Already completed",
-                plan_summary["already_completed"],
-            )
-            col3.metric(
-                "Blocked by traffic",
-                plan_summary["blocked_by_traffic"],
+            approve_live = st.checkbox(
+                "I approve live website research and the selected API usage",
+                value=False,
+                key=f"approve_live_research_{selected_campaign['id']}",
             )
 
-            st.info(
-                "Live research execution is disabled in this public demo. "
-                "No external research requests or paid API calls are "
-                "triggered from this page."
-            )
+            if st.button(
+                "Run Live Research",
+                type="primary",
+                disabled=not approve_live or plan_summary["ready_for_research"] == 0,
+                key=f"run_live_research_{selected_campaign['id']}",
+            ):
+                with st.spinner("Running approved company research..."):
+                    live_result = run_campaign_research(
+                        selected_campaign["id"],
+                        execute=True,
+                        confirm_external_calls=True,
+                        refresh_traffic_api=refresh_tabapi,
+                    )
+                st.success(
+                    f"Research finished. Attempted "
+                    f"{live_result.get('companies_attempted', 0)} companies."
+                )
+                st.json(live_result)
+                st.rerun()
+
+            if plan_summary["ready_for_research"] == 0:
+                st.warning(
+                    "There are no companies currently marked ready for research. "
+                    "Check the traffic eligibility status and research queue first."
+                )
 
         except Exception as error:
             st.error(
-                f"Unable to prepare the research plan: "
+                f"Unable to prepare or run the research plan: "
                 f"{type(error).__name__}: {error}"
             )
 
