@@ -28,7 +28,7 @@ def build_campaign_research_plan(campaign_id):
         elif research_status == "completed":
             action = "skip_already_completed"
         elif research_status in {"partially_researched", "research_failed"}:
-            action = "manual_review_before_retry"
+            action = "ready_for_retry"
         elif research_status == "research_in_progress":
             action = "skip_in_progress"
         elif research_status == "research_required":
@@ -56,6 +56,9 @@ def build_campaign_research_plan(campaign_id):
             "ready_for_research": sum(
                 item["action"] == "ready_for_research" for item in plan
             ),
+            "ready_for_retry": sum(
+                item["action"] == "ready_for_retry" for item in plan
+            ),
             "already_completed": sum(
                 item["action"] == "skip_already_completed" for item in plan
             ),
@@ -64,11 +67,7 @@ def build_campaign_research_plan(campaign_id):
                 for item in plan
             ),
             "manual_review": sum(
-                item["action"] in {
-                    "manual_review",
-                    "manual_review_before_retry",
-                }
-                for item in plan
+                item["action"] == "manual_review" for item in plan
             ),
             "in_progress": sum(
                 item["action"] == "skip_in_progress" for item in plan
@@ -123,7 +122,7 @@ def run_campaign_research(
     results = []
 
     for item in plan["companies"]:
-        if item["action"] != "ready_for_research":
+        if item["action"] not in {"ready_for_research", "ready_for_retry"}:
             continue
 
         company_id = item["company_id"]
@@ -131,6 +130,7 @@ def run_campaign_research(
 
         company_result = {
             "company_id": company_id,
+            "research_action": item["action"],
             "company_name": item["company_name"],
             "campaign_monthly_visits": campaign_visits,
             "traffic_reuse": (
@@ -178,15 +178,17 @@ def run_campaign_research(
         "campaign_id": campaign_id,
         "mode": "live_execution",
         "external_calls_made": bool(results),
-        "companies_considered": plan["summary"]["ready_for_research"],
+        "companies_considered": (
+            plan["summary"]["ready_for_research"]
+            + plan["summary"]["ready_for_retry"]
+        ),
         "companies_attempted": len(results),
         "tabapi_refresh_enabled": refresh_traffic_api,
         "results": results,
         "note": (
-            "Only companies marked ready_for_research were submitted. "
-            "Campaign traffic was reused where available. TabAPI refresh was "
-            "disabled unless explicitly requested. Partially researched and "
-            "failed companies require manual review."
+            "Only companies marked ready_for_research or ready_for_retry "
+            "were submitted. Campaign traffic was reused where available. "
+            "TabAPI refresh was disabled unless explicitly requested."
         ),
     }
 
