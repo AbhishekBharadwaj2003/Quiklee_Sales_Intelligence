@@ -22,15 +22,17 @@ def run_campaign_traffic_validation(campaign_id, months=3):
     unique = {}
     for row in rows:
         item = dict(row)
-        if item.get('company_id') and item.get('website'):
-            unique.setdefault(item['company_id'], item)
+        if item.get('company_id'):
+            existing = unique.get(item['company_id'])
+            if existing is None or (not existing.get('website') and item.get('website')):
+                unique[item['company_id']] = item
     results = []
     for company_id, item in unique.items():
         company = get_company_by_id(company_id) or {}
         website = item.get('website') or company.get('website_url') or ''
         domain = str(website).strip().replace('https://', '').replace('http://', '').split('/')[0].lower().removeprefix('www.')
         if not domain:
-            results.append({'company': item['source_brand_name'], 'domain': '', 'status': 'unavailable', 'error': 'Website URL missing'})
+            results.append({'company': item['source_brand_name'], 'domain': '', 'monthly_visits': None, 'traffic_status': 'pending', 'error': 'Website URL missing'})
             continue
         if not company.get('website_url'):
             update_company(company_id, {'website_url': website})
@@ -101,5 +103,11 @@ def build_campaign_report(campaign_id):
         if not data.empty:
             data.sort_values('lead_score', ascending=False, na_position='last').to_excel(writer, sheet_name='Lead Prioritisation', index=False)
             data[['company_name', 'website', 'monthly_visits', 'traffic_status']].to_excel(writer, sheet_name='Website Intelligence', index=False)
+        with get_db() as connection:
+            contacts = connection.execute(
+                "SELECT c.company_name, cc.contact_name, cc.designation, cc.email, cc.phone, cc.linkedin_url, cc.contact_source, cc.enrichment_status FROM company_contacts cc JOIN companies c ON c.id=cc.company_id JOIN campaign_records cr ON cr.company_id=c.id WHERE cr.campaign_id=? GROUP BY cc.id ORDER BY c.company_name",
+                (campaign_id,),
+            ).fetchall()
+        pd.DataFrame([dict(row) for row in contacts]).to_excel(writer, sheet_name='Contact Intelligence', index=False)
     output.seek(0)
     return output.getvalue()
