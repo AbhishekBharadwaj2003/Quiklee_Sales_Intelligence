@@ -22,7 +22,7 @@ from database.campaign_research_controller import (
 from database.campaign_linker import link_campaign_companies
 from enrichment.lusha_reveal_ui import render_lusha_reveal_ui
 from enrichment.lusha_discovery_ui import render_lusha_discovery_ui
-from campaign_workflow import run_campaign_traffic_validation, score_campaign_leads, get_campaign_intelligence, build_campaign_report, reset_campaign_traffic_to_pending
+from campaign_workflow import get_campaign_traffic_candidates, run_single_company_traffic_validation, score_campaign_leads, get_campaign_intelligence, build_campaign_report, reset_campaign_traffic_to_pending
 
 from database.campaign_repository import (
     create_campaign,
@@ -1029,51 +1029,135 @@ elif page == "Campaign Management":
 
         st.divider()
         st.subheader("7. Validate website traffic with TabAPI")
-        st.caption("To keep the app responsive, each click checks a maximum of 10 unique companies. Results are saved, and the next click continues with the next unprocessed companies.")
-        campaign_id = selected_campaign["id"]
-        batch_result_key = "tabapi_batch_result_" + str(campaign_id)
-        batch_error_key = "tabapi_batch_error_" + str(campaign_id)
-        approve_tabapi = st.checkbox(
-            "I approve TabAPI traffic lookups for this campaign. Each batch may consume API credits.",
-            key="approve_tabapi_" + str(campaign_id),
+        st.caption(
+            "Choose one company at a time. Selecting a company does not use credits; "
+            "only clicking the research button sends one TabAPI request."
         )
-        if st.button(
-            "Validate next 10 companies",
-            type="primary",
-            disabled=not approve_tabapi,
-            key="validate_tabapi_" + str(campaign_id),
-        ):
-            st.session_state.pop(batch_result_key, None)
-            st.session_state.pop(batch_error_key, None)
-            try:
-                with st.spinner("Checking up to 10 company websites with TabAPI..."):
-                    st.session_state[batch_result_key] = run_campaign_traffic_validation(
-                        campaign_id, batch_size=10
+
+        campaign_id = selected_campaign["id"]
+        tabapi_candidates = get_campaign_traffic_candidates(campaign_id)
+
+        tabapi_result_key = "tabapi_single_result_" + str(campaign_id)
+        tabapi_error_key = "tabapi_single_error_" + str(campaign_id)
+
+        if tabapi_candidates:
+            candidate_by_id = {
+                item["company_id"]: item for item in tabapi_candidates
+            }
+
+            selected_company_id = st.selectbox(
+                "Select a company for traffic research",
+                options=list(candidate_by_id.keys()),
+                format_func=lambda company_id: (
+                    candidate_by_id[company_id]["company_name"]
+                    + " — "
+                    + (
+                        candidate_by_id[company_id]["domain"]
+                        or "Website missing"
                     )
-            except Exception as error:
-                st.session_state[batch_error_key] = (
-                    type(error).__name__ + ": " + str(error)
+                ),
+                key="tabapi_company_select_" + str(campaign_id),
+            )
+
+            selected_company = candidate_by_id[selected_company_id]
+
+            detail_col1, detail_col2 = st.columns(2)
+            with detail_col1:
+                st.write("**Website**")
+                st.write(selected_company["website"] or "Not available")
+            with detail_col2:
+                st.write("**Current status**")
+                st.write(selected_company["traffic_status"].replace("_", " ").title())
+
+            approve_tabapi = st.checkbox(
+                "I approve one TabAPI traffic lookup for the selected company. This request may consume API credits.",
+                key="approve_tabapi_single_" + str(campaign_id),
+            )
+
+            if st.button(
+                "Research selected company",
+                type="primary",
+                disabled=not approve_tabapi,
+                key="validate_tabapi_single_" + str(campaign_id),
+            ):
+                st.session_state.pop(tabapi_result_key, None)
+                st.session_state.pop(tabapi_error_key, None)
+
+                try:
+                    with st.spinner(
+                        "Checking "
+                        + selected_company["company_name"]
+                        + " with TabAPI..."
+                    ):
+                        st.session_state[tabapi_result_key] = (
+                            run_single_company_traffic_validation(
+                                campaign_id,
+                                selected_company_id,
+                            )
+                        )
+                except Exception as error:
+                    st.session_state[tabapi_error_key] = (
+                        type(error).__name__ + ": " + str(error)
+                    )
+
+                st.rerun()
+
+        else:
+            st.success(
+                "There are no companies awaiting TabAPI traffic validation "
+                "in this campaign."
+            )
+
+        if st.session_state.get(tabapi_error_key):
+            st.error(
+                "TabAPI lookup failed: "
+                + st.session_state[tabapi_error_key]
+            )
+
+        saved_tabapi_result = st.session_state.get(tabapi_result_key)
+
+        if saved_tabapi_result:
+            if saved_tabapi_result.get("traffic_status") == "qualified":
+                st.success(
+                    saved_tabapi_result["company"]
+                    + " qualified with "
+                    + f'{saved_tabapi_result["monthly_visits"]:,.0f}'
+                    + " monthly visits."
+                )
+            elif saved_tabapi_result.get("traffic_status") == "below_threshold":
+                st.warning(
+                    saved_tabapi_result["company"]
+                    + " is below the required traffic threshold. "
+                    + f'{saved_tabapi_result["monthly_visits"]:,.0f}'
+                    + " monthly visits."
+                )
+            else:
+                st.error(
+                    saved_tabapi_result.get("error")
+                    or "TabAPI did not return a usable traffic figure. "
+                       "The company remains pending."
                 )
 
-        if st.session_state.get(batch_error_key):
-            st.error("TabAPI batch failed: " + st.session_state[batch_error_key])
-        saved_batch_result = st.session_state.get(batch_result_key)
-        if saved_batch_result:
-            st.success(
-                str(saved_batch_result.get("processed_this_batch", 0))
-                + " companies processed in this batch. "
-                + str(saved_batch_result.get("remaining", 0))
-                + " companies remain."
+            st.dataframe(
+                pd.DataFrame([saved_tabapi_result]),
+                use_container_width=True,
+                hide_index=True,
             )
-            if saved_batch_result.get("results"):
-                st.dataframe(
-                    pd.DataFrame(saved_batch_result["results"]),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-        st.caption("Spreadsheet visitor estimates are retained in the original uploaded data, but are not treated as verified traffic. Only completed TabAPI lookups can qualify a company.")
+
+        remaining_count = len(get_campaign_traffic_candidates(campaign_id))
+        st.caption(
+            str(remaining_count)
+            + " companies are currently awaiting individual TabAPI validation."
+        )
+
+        st.caption(
+            "Only successful TabAPI results are saved as verified traffic. "
+            "A lookup error does not qualify or disqualify a company. "
+            "The qualification rule is strictly greater than 100,000 monthly visits."
+        )
+
         reset_confirm = st.checkbox(
-            "I understand this will clear the imported/unverified visitor figures for this campaign and return all its companies to pending TabAPI validation.",
+            "I understand this will clear the verified visitor figures for this campaign and return all its companies to pending TabAPI validation.",
             key="reset_traffic_confirm_" + str(campaign_id),
         )
         if st.button(
@@ -1082,8 +1166,13 @@ elif page == "Campaign Management":
             key="reset_traffic_" + str(campaign_id),
         ):
             reset_count = reset_campaign_traffic_to_pending(campaign_id)
-            st.session_state.pop(batch_result_key, None)
-            st.success(str(reset_count) + " campaign records returned to pending. Original spreadsheet data is preserved.")
+            st.session_state.pop(tabapi_result_key, None)
+            st.session_state.pop(tabapi_error_key, None)
+            st.success(
+                str(reset_count)
+                + " campaign records returned to pending. "
+                  "Original spreadsheet data is preserved."
+            )
             st.rerun()
 
         st.subheader("8. Calculate lead scores")
