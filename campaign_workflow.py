@@ -446,18 +446,15 @@ def build_campaign_report(campaign_id):
                     values.append(text_value)
             return "\n".join(values) if values else "Not revealed"
 
-        company_contacts = (
-            contacts.groupby("company_id", dropna=False)
-            .apply(
-                lambda group: pd.Series({
-                    "Discovered Contacts": joined_contact_values(group, "Contact Name"),
-                    "Revealed Emails": joined_contact_values(group, "Email"),
-                    "Revealed Phone Numbers": joined_contact_values(group, "Phone"),
-                }),
-                include_groups=False,
-            )
-            .reset_index()
-        )
+        company_contact_rows = []
+        for company_id, group in contacts.groupby("company_id", dropna=False):
+            company_contact_rows.append({
+                "company_id": company_id,
+                "Discovered Contacts": joined_contact_values(group, "Contact Name"),
+                "Revealed Emails": joined_contact_values(group, "Email"),
+                "Revealed Phone Numbers": joined_contact_values(group, "Phone"),
+            })
+        company_contacts = pd.DataFrame(company_contact_rows)
 
         data = data.merge(
             company_contacts,
@@ -546,7 +543,15 @@ def build_campaign_report(campaign_id):
             for row in worksheet.iter_rows(min_row=2):
                 for cell in row:
                     if "\n" in str(cell.value or ""):
-                        cell.alignment = cell.alignment.copy(wrap_text=True, vertical="top")
+                        from openpyxl.styles import Alignment
+                        cell.alignment = Alignment(
+                            horizontal=cell.alignment.horizontal,
+                            vertical="top",
+                            text_rotation=cell.alignment.text_rotation,
+                            wrap_text=True,
+                            shrink_to_fit=cell.alignment.shrink_to_fit,
+                            indent=cell.alignment.indent,
+                        )
 
     output.seek(0)
     return output.getvalue()
