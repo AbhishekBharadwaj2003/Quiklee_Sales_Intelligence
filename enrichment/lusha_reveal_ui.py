@@ -474,8 +474,9 @@ def render_lusha_reveal_ui(csv_path):
 
     st.subheader("Lusha Contact Reveal")
     st.caption(
-        "Email and phone reveals are locked independently at brand level. "
-        "Every new request requires explicit confirmation."
+        "Select one discovered contact. Email and phone are separate paid "
+        "operations and each requires its own approval. To avoid accidental "
+        "repeat charges, the current safety ledger locks each field once per brand."
     )
 
     if not path.exists():
@@ -498,126 +499,173 @@ def render_lusha_reveal_ui(csv_path):
         return
 
     df = pd.read_csv(path, dtype=str).fillna("")
-    required = {
-        "lusha_contact_id",
-        "full_name",
-        "company_name",
-    }
-
-    if not required.issubset(df.columns):
-        st.error("The Lusha contacts CSV is missing required columns.")
-        return
-
     if df.empty:
         st.info("No discovered Lusha contacts are available.")
         return
 
-    for _, contact in df.iterrows():
-        contact_id = _clean(contact.get("lusha_contact_id"))
-        name = _clean(contact.get("full_name")) or "Unnamed contact"
-        company = _clean(contact.get("company_name"))
-        if not contact_id:
+    # Support both the discovery schema (contact_name) and the older
+    # reveal schema (full_name) so existing saved contacts remain usable.
+    if "full_name" not in df.columns:
+        df["full_name"] = df.get("contact_name", "")
+    if "contact_name" not in df.columns:
+        df["contact_name"] = df.get("full_name", "")
+
+    if "lusha_contact_id" not in df.columns:
+        st.error(
+            "The contacts file has no Lusha contact IDs. "
+            "These records cannot be used for Lusha reveal requests."
+        )
+        return
+
+    df["lusha_contact_id"] = df["lusha_contact_id"].fillna("").astype(str).str.strip()
+    eligible = df[
+        (df["lusha_contact_id"] != "")
+        & (
+            df.get("full_name", pd.Series("", index=df.index)).astype(str).str.strip() != ""
+        )
+    ].copy()
+
+    if eligible.empty:
+        st.warning(
+            "No discovered contacts have both a name and a Lusha contact ID. "
+            "Contact discovery results may still be useful for outreach, but "
+            "Lusha's reveal endpoint requires a contact ID."
+        )
+        return
+
+    eligible["_row_index"] = eligible.index
+    eligible["_label"] = eligible.apply(
+        lambda row: (
+            str(row.get("full_name") or row.get("contact_name") or "Unnamed")
+            + " — "
+            + str(row.get("designation") or "Title unavailable")
+            + " — "
+            + str(row.get("company_name") or "Company unavailable")
+        ),
+        axis=1,
+    )
+
+    selected_row_index = st.selectbox(
+        "Select one contact to enrich",
+        options=eligible["_row_index"].tolist(),
+        format_func=lambda row_index: eligible.loc[
+            eligible["_row_index"] == row_index, "_label"
+        ].iloc[0],
+        key="lusha_reveal_contact_selection",
+    )
+    contact = df.loc[selected_row_index].to_dict()
+    contact_id = _clean(contact.get("lusha_contact_id"))
+    name = _clean(contact.get("full_name")) or _clean(contact.get("contact_name"))
+    company = _clean(contact.get("company_name"))
+    brand_key = _brand_identity(contact)
+
+    st.write(f"**{name}**")
+    st.write(f"{contact.get('designation') or 'Designation unavailable'} · {company}")
+    if _clean(contact.get("linkedin_url")):
+        st.write(_clean(contact.get("linkedin_url")))
+
+    for field, label in [
+        ("emails", "Email"),
+        ("phones", "Phone"),
+    ]:
+        field_type = FIELD_MAP[field]
+        availability_value = _clean(
+            contact.get(f"{field[:-1]}_reveal_available", "")
+        ).lower()
+        value_column = f"revealed_{field}"
+        status_column = f"{field}_reveal_status"
+        existing_value = _clean(contact.get(value_column))
+        existing_status = _clean(contact.get(status_column))
+
+        with sqlite3.connect(DB_FILE, timeout=30) as connection:
+            ledger = connection.execute(
+                """
+                SELECT reveal_status, contact_id, revealed_value
+                FROM contact_reveal_ledger
+                WHERE brand_key = ? AND field_type = ?
+                ORDER BY id
+                LIMIT 1
+                """,
+                (brand_key, field_type),
+            ).fetchone()
+
+        st.divider()
+        st.markdown(f"**{label}**")
+
+        if existing_value:
+            st.success(f"{label} already revealed: {existing_value}")
             continue
 
-        brand_key = _brand_identity(contact)
-
-        with st.container(border=True):
-            st.markdown(f"**{name}**")
-            st.caption(f"{company} · {brand_key}")
-
-            for field, label in [
-                ("emails", "Email"),
-                ("phones", "Phone"),
-            ]:
-                field_type = FIELD_MAP[field]
-                availability = _clean(
-                    contact.get(f"{field[:-1]}_reveal_available")
-                ).lower()
-                value_column = f"revealed_{field}"
-                status_column = f"{field}_reveal_status"
-                existing_value = _clean(contact.get(value_column))
-                existing_status = _clean(contact.get(status_column))
-
-                with sqlite3.connect(DB_FILE, timeout=30) as connection:
-                    ledger = connection.execute(
-                        """
-                        SELECT reveal_status, contact_id, revealed_value
-                        FROM contact_reveal_ledger
-                        WHERE brand_key = ? AND field_type = ?
-                        ORDER BY id
-                        LIMIT 1
-                        """,
-                        (brand_key, field_type),
-                    ).fetchone()
-
-                if existing_value:
-                    st.success(f"{label} revealed: {existing_value}")
-                    continue
-
-                if ledger:
-                    ledger_status, ledger_contact, ledger_value = ledger
-                    if ledger_value:
-                        st.success(
-                            f"{label} already revealed for this brand "
-                            f"(contact ID: {ledger_contact or 'unknown'})."
-                        )
-                    else:
-                        st.warning(
-                            f"{label} locked for this brand. "
-                            f"Ledger status: {ledger_status}. "
-                            "Check billing and reconcile the ledger before "
-                            "any further action."
-                        )
-                    continue
-
-                if existing_status:
-                    st.warning(
-                        f"{label}: {existing_status}. "
-                        "This contact has a previous attempt recorded."
-                    )
-                    continue
-
-                if availability != "available":
-                    st.info(f"{label}: Not available from Lusha.")
-                    continue
-
-                credits = _clean(
-                    contact.get(f"{field[:-1]}_reveal_credits")
-                ) or "Unknown"
-
-                st.write(f"**{label} reveal cost:** {credits} credit(s)")
-                approved = st.checkbox(
-                    f"I approve spending {credits} credit(s) "
-                    f"to reveal this {label.lower()}.",
-                    key=f"approve_{field}_{contact_id}",
+        if ledger:
+            ledger_status, ledger_contact, ledger_value = ledger
+            if ledger_value:
+                st.success(
+                    f"{label} already revealed for this brand "
+                    f"(contact ID: {ledger_contact or 'unknown'})."
                 )
+            else:
+                st.warning(
+                    f"{label} reveal is locked for this brand. "
+                    f"Ledger status: {ledger_status}. "
+                    "Check Lusha billing and reconcile the ledger before "
+                    "attempting another request."
+                )
+            continue
 
-                if st.button(
-                    f"Reveal {label}",
-                    key=f"reveal_{field}_{contact_id}",
-                    disabled=not approved,
-                    use_container_width=True,
-                ):
-                    try:
-                        with st.spinner(f"Revealing {label.lower()}..."):
-                            values, actual_credits = _reveal_one(
-                                path, contact_id, field
-                            )
+        if existing_status:
+            st.warning(
+                f"{label}: {existing_status}. "
+                "A previous attempt is recorded; do not retry until billing "
+                "has been checked."
+            )
+            continue
 
-                        if values:
-                            st.success(
-                                f"{label} revealed. "
-                                f"Credits charged: {actual_credits}"
-                            )
-                        else:
-                            st.warning(
-                                f"No {label.lower()} data returned. "
-                                f"Credits charged: {actual_credits}. "
-                                "This brand+field is now locked."
-                            )
-                        st.rerun()
+        if availability_value in ("false", "no", "unavailable", "not_available"):
+            st.info(f"{label} is marked unavailable by Lusha.")
+            continue
 
-                    except Exception as exc:
-                        st.error(str(exc))
+        credits = _clean(
+            contact.get(f"{field[:-1]}_reveal_credits", "")
+        ) or "Unknown"
 
-            st.divider()
+        if availability_value in ("true", "yes", "available"):
+            st.caption(f"Lusha indicates this field is available. Estimated cost: {credits} credit(s).")
+        else:
+            st.warning(
+                f"Lusha did not provide availability metadata for this {label.lower()}. "
+                "A reveal request may return no data and may consume credits."
+            )
+            st.caption(f"Estimated cost: {credits} credit(s).")
+
+        approved = st.checkbox(
+            f"I approve one {label.lower()} reveal for {name}. "
+            f"Potential cost: {credits} credit(s).",
+            key=f"approve_{field}_{contact_id}",
+        )
+
+        if st.button(
+            f"Reveal {label} for {name}",
+            key=f"reveal_{field}_{contact_id}",
+            disabled=not approved,
+            use_container_width=True,
+        ):
+            try:
+                with st.spinner(f"Revealing {label.lower()}..."):
+                    values, actual_credits = _reveal_one(
+                        path, contact_id, field
+                    )
+
+                if values:
+                    st.success(
+                        f"{label} revealed. Credits charged: {actual_credits}"
+                    )
+                else:
+                    st.warning(
+                        f"No {label.lower()} data returned. "
+                        f"Credits charged: {actual_credits}. "
+                        "This brand+field is now locked to prevent repeat charges."
+                    )
+                st.rerun()
+
+            except Exception as exc:
+                st.error(str(exc))
