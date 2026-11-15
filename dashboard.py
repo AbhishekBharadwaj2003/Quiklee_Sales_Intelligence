@@ -1190,7 +1190,7 @@ elif page == "Campaign Management":
             )
             st.rerun()
 
-                st.subheader("8. Calculate lead scores")
+        st.subheader("8. Calculate lead scores")
         if st.button("Score qualified companies", key="score_campaign_" + str(selected_campaign["id"])):
             score_results = score_campaign_leads(selected_campaign["id"])
             st.dataframe(pd.DataFrame(score_results), use_container_width=True, hide_index=True)
