@@ -43,7 +43,21 @@ class LushaProspectingClient:
             raise RuntimeError("Lusha returned a credit-related error.")
 
         if response.status_code == 403:
-            raise RuntimeError("Lusha denied access to this API operation.")
+            # Preserve Lusha's diagnostic message so the dashboard can
+            # distinguish inactive account, disabled V3 access, and plan
+            # or endpoint permissions. Never include request headers/API key.
+            try:
+                error_body = response.json()
+                detail = error_body.get("message") or error_body.get("error")
+                if not detail:
+                    detail = str(error_body)
+            except ValueError:
+                detail = response.text[:1000]
+
+            raise RuntimeError(
+                "Lusha returned HTTP 403 (Forbidden): "
+                + str(detail)[:1000]
+            )
 
         if response.status_code == 429:
             raise RuntimeError("Lusha rate limit reached.")
