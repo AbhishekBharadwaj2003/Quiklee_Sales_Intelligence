@@ -17,6 +17,8 @@ def add_contact(company_id: int, contact: dict):
     with get_db() as connection:
 
         # Check for an existing contact
+        designation = (contact.get("designation") or "").strip()
+
         existing = connection.execute(
             """
             SELECT id FROM company_contacts
@@ -24,13 +26,21 @@ def add_contact(company_id: int, contact: dict):
             AND (
                 (? != '' AND LOWER(email) = ?)
                 OR (? != '' AND linkedin_url = ?)
+                OR (
+                    ? = ''
+                    AND ? = ''
+                    AND LOWER(contact_name) = LOWER(?)
+                    AND LOWER(COALESCE(designation, '')) = LOWER(?)
+                )
             )
             LIMIT 1
             """,
             (
                 company_id,
                 email, email,
-                linkedin, linkedin
+                linkedin, linkedin,
+                email, linkedin,
+                name, designation
             )
         ).fetchone()
 
