@@ -250,8 +250,8 @@ def qualify_company(company_id: int, business_inputs=None, campaign_id=None):
     Calculate and save an evidence-based qualification score.
 
     When campaign_id is supplied, campaign traffic eligibility is enforced:
-    - 100,000 or more monthly visitors: qualification is allowed.
-    - Below 100,000: qualification is blocked.
+    - More than 100,000 monthly visitors: qualification is allowed.
+    - 100,000 or fewer: qualification is blocked.
     - Pending or conflicting traffic: qualification is blocked for review.
 
     Omitting campaign_id preserves the existing standalone qualification
@@ -305,7 +305,7 @@ def qualify_company(company_id: int, business_inputs=None, campaign_id=None):
             )
 
         if campaign_entry["monthly_visits"] is None or (
-            float(campaign_entry["monthly_visits"]) < TRAFFIC_THRESHOLD
+            float(campaign_entry["monthly_visits"]) <= TRAFFIC_THRESHOLD
         ):
             raise ValueError(
                 "Qualification blocked: campaign traffic does not meet the "
