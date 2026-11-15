@@ -67,19 +67,55 @@ def _normalise_contact(item, company_name, domain):
     title = job.get("title") if isinstance(job, dict) else job
     linkedin = _first_value(socials, "linkedin", "linkedinUrl", "linkedin_url")
     linkedin = linkedin or _first_value(item, "linkedinUrl", "linkedin_url")
-    contact_id = _first_value(item, "id", "contactId", "contact_id")
+    contact_id = _first_value(
+        item, "id", "contactId", "contact_id", "personId", "person_id"
+    )
+
+    # Preserve availability/cost metadata when Lusha includes it. If the
+    # prospecting response omits these fields, mark availability as unknown
+    # rather than assuming a paid reveal is available.
+    email_available = _first_value(
+        item, "emailRevealAvailable", "email_reveal_available",
+        "hasEmail", "has_email"
+    )
+    phone_available = _first_value(
+        item, "phoneRevealAvailable", "phone_reveal_available",
+        "hasPhone", "has_phone"
+    )
+    email_cost = _first_value(
+        item, "emailRevealCredits", "email_reveal_credits",
+        "emailCredits", "email_credits"
+    )
+    phone_cost = _first_value(
+        item, "phoneRevealCredits", "phone_reveal_credits",
+        "phoneCredits", "phone_credits"
+    )
 
     return {
         "lusha_contact_id": str(contact_id or ""),
         "contact_name": str(full_name).strip(),
+        "full_name": str(full_name).strip(),
         "designation": str(title or item.get("title") or "").strip(),
         "company_name": str(_first_value(company, "name", "companyName") or company_name),
         "company_domain": str(_first_value(company, "domain", "website") or domain),
         "linkedin_url": str(linkedin or "").strip(),
-        "contact_source": "Lusha Prospecting API",
-        "enrichment_status": "prospected",
+        "email_reveal_available": (
+            str(email_available).lower()
+            if email_available is not None else "unknown"
+        ),
+        "phone_reveal_available": (
+            str(phone_available).lower()
+            if phone_available is not None else "unknown"
+        ),
+        "email_reveal_credits": str(email_cost or ""),
+        "phone_reveal_credits": str(phone_cost or ""),
         "revealed_emails": "",
         "revealed_phones": "",
+        "contact_source": "Lusha Prospecting API",
+        "enrichment_status": "prospected",
+        "lusha_raw_contact_json": json.dumps(
+            item, ensure_ascii=False, default=str
+        ),
     }
 
 
