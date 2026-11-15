@@ -65,21 +65,37 @@ def _extract_contacts(response):
 def render_lusha_discovery_ui(output_path, company_id, company_name, website_url):
     st.subheader('Lusha Contact Discovery')
     st.caption('Search for relevant decision-makers. Prospecting may consume Lusha credits; contact details are not revealed by this search.')
-    domain = str(website_url or '').replace('https://', '').replace('http://', '').split('/')[0].strip().lower()
+    domain = str(website_url or '').strip().lower()
+    if domain.startswith(('https://', 'http://')):
+        domain = domain.split('://', 1)[1]
+    domain = domain.split('/', 1)[0].split(':', 1)[0].strip()
+    if domain.startswith('www.'):
+        domain = domain[4:]
     if not domain:
         st.warning('Add the official company website before searching Lusha.')
         return
     roles = ['Operations Head', 'Head of Operations', 'VP Operations', 'Growth Head', 'Head of Growth', 'Supply Chain Head', 'Head of Supply Chain', 'Marketplace Head', 'D2C Head']
-    selected_roles = st.multiselect('Priority job titles', roles, default=roles, key=f'l_sha_roles_{company_id}')
+    selected_roles = st.multiselect(
+        'Priority job titles (optional for domain-only test)',
+        roles,
+        default=roles,
+        key=f'l_sha_roles_{company_id}',
+        help='Clear all titles to search the selected company domain without a job-title filter.'
+    )
     page_size = st.select_slider('Maximum prospects to request', options=[10, 25, 50], value=10, key=f'l_sha_size_{company_id}')
     confirm = st.checkbox('I approve a Lusha prospecting search for this company; it may consume credits.', key=f'l_sha_approve_{company_id}')
-    if st.button('Search decision-makers in Lusha', type='primary', disabled=(not confirm or not selected_roles), key=f'l_sha_search_{company_id}'):
+    if st.button('Search decision-makers in Lusha', type='primary', disabled=(not confirm), key=f'l_sha_search_{company_id}'):
+        filters = {
+            'companies': {'include': {'domains': [domain]}},
+        }
+        # Add a title filter only when the user selects titles. This allows
+        # a controlled domain-only search to isolate company-domain coverage.
+        if selected_roles:
+            filters['contacts'] = {'include': {'jobTitles': selected_roles}}
+
         payload = {
             'pagination': {'page': 0, 'size': max(10, int(page_size))},
-            'filters': {
-                'contacts': {'include': {'jobTitles': selected_roles}},
-                'companies': {'include': {'domains': [domain]}},
-            },
+            'filters': filters,
             # Exclude-DNC filtering is not included in every Lusha plan.
             # Omit that optional flag so prospecting works on the current plan.
             'options': {'includePartialProfiles': True},
