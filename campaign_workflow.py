@@ -511,11 +511,27 @@ def build_campaign_report(campaign_id):
                     values.append(text_value)
             return "\n".join(values) if values else "Not revealed"
 
+        contacts["Contact Person & Job Title"] = contacts.apply(
+            lambda row: (
+                str(row["Contact Name"]).strip()
+                + " — "
+                + (
+                    str(row["designation"]).strip()
+                    if str(row["designation"]).strip()
+                    else "Job title unavailable"
+                )
+            ),
+            axis=1,
+        )
+
         company_contact_rows = []
         for company_id, group in contacts.groupby("company_id", dropna=False):
             company_contact_rows.append({
                 "company_id": company_id,
                 "Discovered Contacts": joined_contact_values(group, "Contact Name"),
+                "Contact Persons & Job Titles": joined_contact_values(
+                    group, "Contact Person & Job Title"
+                ),
                 "Revealed Emails": joined_contact_values(group, "Email"),
                 "Revealed Phone Numbers": joined_contact_values(group, "Phone"),
             })
@@ -529,6 +545,7 @@ def build_campaign_report(campaign_id):
 
         for column in [
             "Discovered Contacts",
+            "Contact Persons & Job Titles",
             "Revealed Emails",
             "Revealed Phone Numbers",
         ]:
@@ -554,6 +571,7 @@ def build_campaign_report(campaign_id):
         })
     else:
         data["Discovered Contacts"] = "Not revealed"
+        data["Contact Persons & Job Titles"] = "Not revealed"
         data["Revealed Emails"] = "Not revealed"
         data["Revealed Phone Numbers"] = "Not revealed"
         contact_report = pd.DataFrame(columns=[
@@ -579,6 +597,7 @@ def build_campaign_report(campaign_id):
                 [
                     "company_name", "website", "monthly_visits",
                     "traffic_status", "Discovered Contacts",
+                    "Contact Persons & Job Titles",
                     "Revealed Emails", "Revealed Phone Numbers",
                 ]
             ].to_excel(
