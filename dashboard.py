@@ -1040,6 +1040,8 @@ elif page == "Campaign Management":
         tabapi_result_key = "tabapi_single_result_" + str(campaign_id)
         tabapi_error_key = "tabapi_single_error_" + str(campaign_id)
 
+        selected_company_id = None
+
         if tabapi_candidates:
             candidate_by_id = {
                 item["company_id"]: item for item in tabapi_candidates
@@ -1096,9 +1098,11 @@ elif page == "Campaign Management":
                             )
                         )
                 except Exception as error:
-                    st.session_state[tabapi_error_key] = (
-                        type(error).__name__ + ": " + str(error)
-                    )
+                    st.session_state[tabapi_error_key] = {
+                        "company_id": selected_company_id,
+                        "company": selected_company["company_name"],
+                        "message": type(error).__name__ + ": " + str(error),
+                    }
 
                 st.rerun()
 
@@ -1108,15 +1112,13 @@ elif page == "Campaign Management":
                 "in this campaign."
             )
 
-        if st.session_state.get(tabapi_error_key):
-            st.error(
-                "TabAPI lookup failed: "
-                + st.session_state[tabapi_error_key]
-            )
-
+        # Display a result only when it belongs to the currently selected company.
         saved_tabapi_result = st.session_state.get(tabapi_result_key)
-
-        if saved_tabapi_result:
+        if (
+            saved_tabapi_result
+            and selected_company_id is not None
+            and saved_tabapi_result.get("company_id") == selected_company_id
+        ):
             if saved_tabapi_result.get("traffic_status") == "qualified":
                 st.success(
                     saved_tabapi_result["company"]
@@ -1142,6 +1144,19 @@ elif page == "Campaign Management":
                 pd.DataFrame([saved_tabapi_result]),
                 use_container_width=True,
                 hide_index=True,
+            )
+
+        saved_tabapi_error = st.session_state.get(tabapi_error_key)
+        if (
+            saved_tabapi_error
+            and selected_company_id is not None
+            and saved_tabapi_error.get("company_id") == selected_company_id
+        ):
+            st.error(
+                "TabAPI lookup failed for "
+                + saved_tabapi_error["company"]
+                + ": "
+                + saved_tabapi_error["message"]
             )
 
         remaining_count = len(get_campaign_traffic_candidates(campaign_id))
@@ -1175,7 +1190,7 @@ elif page == "Campaign Management":
             )
             st.rerun()
 
-        st.subheader("8. Calculate lead scores")
+                st.subheader("8. Calculate lead scores")
         if st.button("Score qualified companies", key="score_campaign_" + str(selected_campaign["id"])):
             score_results = score_campaign_leads(selected_campaign["id"])
             st.dataframe(pd.DataFrame(score_results), use_container_width=True, hide_index=True)
