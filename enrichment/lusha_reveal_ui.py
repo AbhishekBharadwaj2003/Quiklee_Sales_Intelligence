@@ -506,9 +506,15 @@ def render_lusha_reveal_ui(csv_path):
     # Support both the discovery schema (contact_name) and the older
     # reveal schema (full_name) so existing saved contacts remain usable.
     if "full_name" not in df.columns:
-        df["full_name"] = df.get("contact_name", "")
+        df["full_name"] = ""
     if "contact_name" not in df.columns:
-        df["contact_name"] = df.get("full_name", "")
+        df["contact_name"] = ""
+    df["full_name"] = df["full_name"].replace("", pd.NA).fillna(
+        df["contact_name"]
+    ).fillna("")
+    df["contact_name"] = df["contact_name"].replace("", pd.NA).fillna(
+        df["full_name"]
+    ).fillna("")
 
     if "lusha_contact_id" not in df.columns:
         st.error(
