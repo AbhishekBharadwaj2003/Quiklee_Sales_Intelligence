@@ -380,6 +380,51 @@ def _update_ledger(
         )
 
 
+def _sync_revealed_value_to_database(contact, field, values):
+    """
+    Sync a successfully revealed email/phone into company_contacts.
+    Campaign Excel reports read contact details from this table.
+    """
+    if not values:
+        return 0
+
+    company_id = None
+    with sqlite3.connect(DB_FILE, timeout=30) as connection:
+        connection.row_factory = sqlite3.Row
+        company_id = _company_id_for_contact(connection, contact)
+
+        if company_id is None:
+            return 0
+
+        linkedin = _clean(contact.get("linkedin_url"))
+        name = _clean(contact.get("full_name")) or _clean(
+            contact.get("contact_name")
+        )
+        column = "email" if field == "emails" else "phone"
+        value = "; ".join(values)
+
+        if linkedin:
+            cursor = connection.execute(
+                f"""
+                UPDATE company_contacts
+                SET {column} = ?, enrichment_status = 'revealed'
+                WHERE company_id = ? AND linkedin_url = ?
+                """,
+                (value, company_id, linkedin),
+            )
+        else:
+            cursor = connection.execute(
+                f"""
+                UPDATE company_contacts
+                SET {column} = ?, enrichment_status = 'revealed'
+                WHERE company_id = ? AND lower(trim(contact_name)) = lower(trim(?))
+                """,
+                (value, company_id, name),
+            )
+
+        return cursor.rowcount
+
+
 def _reveal_one(path, contact_id, field):
     if not DB_FILE.exists():
         raise FileNotFoundError(
@@ -442,6 +487,11 @@ def _reveal_one(path, contact_id, field):
             values=values,
             credits=numeric_credits,
         )
+
+        if values:
+            _sync_revealed_value_to_database(
+                df.loc[index].to_dict(), field, values
+            )
 
         return values, credits
 
