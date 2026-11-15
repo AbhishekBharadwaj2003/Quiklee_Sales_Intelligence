@@ -80,7 +80,9 @@ def render_lusha_discovery_ui(output_path, company_id, company_name, website_url
                 'contacts': {'include': {'jobTitles': selected_roles}},
                 'companies': {'include': {'domains': [domain]}},
             },
-            'options': {'includePartialProfiles': True, 'excludeDnc': True},
+            # Exclude-DNC filtering is not included in every Lusha plan.
+            # Omit that optional flag so prospecting works on the current plan.
+            'options': {'includePartialProfiles': True},
         }
         try:
             with st.spinner('Searching Lusha for matching decision-makers...'):
