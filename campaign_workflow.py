@@ -1,4 +1,5 @@
 from io import BytesIO
+from pathlib import Path
 from urllib.parse import urlparse
 
 import pandas as pd
@@ -418,7 +419,7 @@ def build_campaign_report(campaign_id):
     # Backfill reveal values already saved in the Lusha CSV before database
     # syncing was added. This is read-only and makes historical reveals appear
     # in the report without asking the user to spend credits again.
-    lusha_csv = pd.io.common.file_exists("data/lusha_discovered_contacts.csv")
+    lusha_csv = Path("data/lusha_discovered_contacts.csv").exists()
     if lusha_csv:
         try:
             saved_lusha = pd.read_csv(
