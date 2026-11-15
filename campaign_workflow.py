@@ -415,6 +415,70 @@ def build_campaign_report(campaign_id):
 
     contacts = pd.DataFrame([dict(row) for row in contact_rows])
 
+    # Backfill reveal values already saved in the Lusha CSV before database
+    # syncing was added. This is read-only and makes historical reveals appear
+    # in the report without asking the user to spend credits again.
+    lusha_csv = pd.io.common.file_exists("data/lusha_discovered_contacts.csv")
+    if lusha_csv:
+        try:
+            saved_lusha = pd.read_csv(
+                "data/lusha_discovered_contacts.csv",
+                dtype=str,
+                encoding="utf-8-sig",
+            ).fillna("")
+        except (OSError, pd.errors.EmptyDataError, UnicodeDecodeError):
+            saved_lusha = pd.DataFrame()
+    else:
+        saved_lusha = pd.DataFrame()
+
+    if not contacts.empty and not saved_lusha.empty:
+        def report_key(company_name, contact_name):
+            return (
+                str(company_name or "").strip().lower(),
+                str(contact_name or "").strip().lower(),
+            )
+
+        saved_name_column = (
+            "contact_name" if "contact_name" in saved_lusha.columns
+            else "full_name" if "full_name" in saved_lusha.columns
+            else None
+        )
+        saved_email_column = (
+            "revealed_emails" if "revealed_emails" in saved_lusha.columns
+            else "email" if "email" in saved_lusha.columns
+            else None
+        )
+        saved_phone_column = (
+            "revealed_phones" if "revealed_phones" in saved_lusha.columns
+            else "phone" if "phone" in saved_lusha.columns
+            else None
+        )
+
+        if saved_name_column:
+            saved_reveals = {}
+            for _, saved_row in saved_lusha.iterrows():
+                key = report_key(
+                    saved_row.get("company_name", ""),
+                    saved_row.get(saved_name_column, ""),
+                )
+                saved_reveals[key] = {
+                    "email": str(saved_row.get(saved_email_column, "") or "").strip()
+                    if saved_email_column else "",
+                    "phone": str(saved_row.get(saved_phone_column, "") or "").strip()
+                    if saved_phone_column else "",
+                }
+
+            for index, contact_row in contacts.iterrows():
+                key = report_key(
+                    contact_row.get("company_name", ""),
+                    contact_row.get("contact_name", ""),
+                )
+                previous = saved_reveals.get(key, {})
+                if not str(contact_row.get("email") or "").strip():
+                    contacts.at[index, "email"] = previous.get("email", "")
+                if not str(contact_row.get("phone") or "").strip():
+                    contacts.at[index, "phone"] = previous.get("phone", "")
+
     if not contacts.empty:
         for column in ["contact_name", "designation", "email", "phone", "linkedin_url"]:
             if column not in contacts.columns:
