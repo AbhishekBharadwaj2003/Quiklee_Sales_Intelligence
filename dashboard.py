@@ -486,7 +486,13 @@ elif page == "Contact Intelligence":
         if FILES["lusha"].exists():
             saved_contacts = pd.read_csv(FILES["lusha"], dtype=str).fillna("")
             if not saved_contacts.empty:
-                display_cols = [col for col in ["contact_name", "designation", "company_name", "linkedin_url", "lusha_contact_id", "enrichment_status"] if col in saved_contacts.columns]
+                display_cols = [col for col in [
+                    "contact_name", "designation", "company_name",
+                    "revealed_emails", "revealed_phones",
+                    "linkedin_url", "lusha_contact_id",
+                    "email_reveal_status", "phone_reveal_status",
+                    "enrichment_status"
+                ] if col in saved_contacts.columns]
                 display_table(saved_contacts[display_cols], 350)
                 render_lusha_reveal_ui(FILES["lusha"])
             else:
