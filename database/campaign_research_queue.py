@@ -149,8 +149,8 @@ def get_campaign_research_queue(campaign_id):
     Build a research queue with one entry per unique company.
 
     Traffic eligibility:
-    - >= 100,000: eligible for research
-    - < 100,000: excluded
+    - > 100,000: eligible for research
+    - <= 100,000: excluded
     - Missing or conflicting traffic: manual review
 
     This function performs database reads only.
@@ -263,7 +263,7 @@ def get_campaign_research_queue(campaign_id):
         else:
             monthly_visits = next(iter(values))
 
-            if monthly_visits >= TRAFFIC_THRESHOLD:
+            if monthly_visits > TRAFFIC_THRESHOLD:
                 traffic_status = "qualified"
             else:
                 traffic_status = "below_threshold"
