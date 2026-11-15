@@ -379,9 +379,125 @@ def get_campaign_intelligence(campaign_id):
 
 
 def build_campaign_report(campaign_id):
-    """Create a multi-sheet Excel report from saved campaign intelligence."""
+    """
+    Create a campaign workbook with company-level contact summaries and
+    a detailed contact sheet. Missing email/phone values are labelled
+    'Not revealed' so users can distinguish missing data from blank cells.
+    """
     data = get_campaign_intelligence(campaign_id)
     output = BytesIO()
+
+    with get_db() as connection:
+        contact_rows = connection.execute(
+            """
+            SELECT
+                cc.company_id,
+                c.company_name,
+                cc.contact_name,
+                cc.designation,
+                cc.email,
+                cc.phone,
+                cc.linkedin_url,
+                cc.contact_source,
+                cc.enrichment_status
+            FROM company_contacts cc
+            JOIN companies c ON c.id = cc.company_id
+            WHERE cc.company_id IN (
+                SELECT DISTINCT company_id
+                FROM campaign_records
+                WHERE campaign_id = ?
+                  AND company_id IS NOT NULL
+            )
+            ORDER BY c.company_name, cc.contact_name
+            """,
+            (campaign_id,),
+        ).fetchall()
+
+    contacts = pd.DataFrame([dict(row) for row in contact_rows])
+
+    if not contacts.empty:
+        for column in ["contact_name", "designation", "email", "phone", "linkedin_url"]:
+            if column not in contacts.columns:
+                contacts[column] = ""
+
+        contacts["contact_name"] = contacts["contact_name"].fillna("").astype(str).str.strip()
+        contacts["designation"] = contacts["designation"].fillna("").astype(str).str.strip()
+        contacts["email"] = contacts["email"].fillna("").astype(str).str.strip()
+        contacts["phone"] = contacts["phone"].fillna("").astype(str).str.strip()
+        contacts["linkedin_url"] = contacts["linkedin_url"].fillna("").astype(str).str.strip()
+
+        contacts["Email"] = contacts["email"].where(
+            contacts["email"] != "", "Not revealed"
+        )
+        contacts["Phone"] = contacts["phone"].where(
+            contacts["phone"] != "", "Not revealed"
+        )
+        contacts["Contact Name"] = contacts["contact_name"].where(
+            contacts["contact_name"] != "", "Name unavailable"
+        )
+
+        # One company can have several prospects. Keep every contact in the
+        # detailed sheet and join their values into the company-level report.
+        def joined_contact_values(group, column):
+            values = []
+            for value in group[column].tolist():
+                text_value = str(value or "").strip()
+                if text_value and text_value not in values:
+                    values.append(text_value)
+            return "\n".join(values) if values else "Not revealed"
+
+        company_contacts = (
+            contacts.groupby("company_id", dropna=False)
+            .apply(
+                lambda group: pd.Series({
+                    "Discovered Contacts": joined_contact_values(group, "Contact Name"),
+                    "Revealed Emails": joined_contact_values(group, "Email"),
+                    "Revealed Phone Numbers": joined_contact_values(group, "Phone"),
+                }),
+                include_groups=False,
+            )
+            .reset_index()
+        )
+
+        data = data.merge(
+            company_contacts,
+            on="company_id",
+            how="left",
+        )
+
+        for column in [
+            "Discovered Contacts",
+            "Revealed Emails",
+            "Revealed Phone Numbers",
+        ]:
+            data[column] = data[column].fillna("Not revealed").replace("", "Not revealed")
+
+        contact_report = contacts[
+            [
+                "company_name",
+                "Contact Name",
+                "designation",
+                "Email",
+                "Phone",
+                "linkedin_url",
+                "contact_source",
+                "enrichment_status",
+            ]
+        ].rename(columns={
+            "company_name": "Company",
+            "designation": "Designation",
+            "linkedin_url": "LinkedIn URL",
+            "contact_source": "Contact Source",
+            "enrichment_status": "Enrichment Status",
+        })
+    else:
+        data["Discovered Contacts"] = "Not revealed"
+        data["Revealed Emails"] = "Not revealed"
+        data["Revealed Phone Numbers"] = "Not revealed"
+        contact_report = pd.DataFrame(columns=[
+            "Company", "Contact Name", "Designation", "Email", "Phone",
+            "LinkedIn URL", "Contact Source", "Enrichment Status"
+        ])
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         data.to_excel(writer, sheet_name="Campaign Overview", index=False)
@@ -398,40 +514,39 @@ def build_campaign_report(campaign_id):
             )
 
             data[
-                ["company_name", "website", "monthly_visits", "traffic_status"]
+                [
+                    "company_name", "website", "monthly_visits",
+                    "traffic_status", "Discovered Contacts",
+                    "Revealed Emails", "Revealed Phone Numbers",
+                ]
             ].to_excel(
                 writer,
                 sheet_name="Website Intelligence",
                 index=False,
             )
 
-        with get_db() as connection:
-            contacts = connection.execute(
-                """
-                SELECT
-                    c.company_name,
-                    cc.contact_name,
-                    cc.designation,
-                    cc.email,
-                    cc.phone,
-                    cc.linkedin_url,
-                    cc.contact_source,
-                    cc.enrichment_status
-                FROM company_contacts cc
-                JOIN companies c ON c.id = cc.company_id
-                JOIN campaign_records cr ON cr.company_id = c.id
-                WHERE cr.campaign_id = ?
-                GROUP BY cc.id
-                ORDER BY c.company_name
-                """,
-                (campaign_id,),
-            ).fetchall()
-
-        pd.DataFrame([dict(row) for row in contacts]).to_excel(
+        contact_report.to_excel(
             writer,
             sheet_name="Contact Intelligence",
             index=False,
         )
+
+        # Make multiline contact summaries readable in spreadsheet apps.
+        for worksheet in writer.book.worksheets:
+            worksheet.freeze_panes = "A2"
+            worksheet.auto_filter.ref = worksheet.dimensions
+            for column_cells in worksheet.columns:
+                max_length = max(
+                    len(str(cell.value or "").split("\n")[0])
+                    for cell in column_cells
+                )
+                worksheet.column_dimensions[
+                    column_cells[0].column_letter
+                ].width = min(max(max_length + 2, 14), 45)
+            for row in worksheet.iter_rows(min_row=2):
+                for cell in row:
+                    if "\n" in str(cell.value or ""):
+                        cell.alignment = cell.alignment.copy(wrap_text=True, vertical="top")
 
     output.seek(0)
     return output.getvalue()
