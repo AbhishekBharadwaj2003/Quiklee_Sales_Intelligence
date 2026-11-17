@@ -419,6 +419,8 @@ def score_campaign_leads(campaign_id, progress_callback=None):
                     "qualification_status": "not_scored",
                     "error": "Traffic is not qualified.",
                 })
+                if progress_callback:
+                    progress_callback(index, total, results[-1])
                 continue
 
             history = get_company_research_history(company_id)
