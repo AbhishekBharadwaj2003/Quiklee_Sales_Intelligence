@@ -503,18 +503,24 @@ elif page == "Contact Intelligence":
                         == selected_company_id
                     )
 
-                selected_domain = re.sub(
-                    r"^www\\.", "",
-                    re.sub(r"^https?://", "", str(company.get("website_url") or "").strip().lower())
-                    .split("/", 1)[0].split(":", 1)[0],
+                selected_domain = (
+                    str(company.get("website_url") or "").strip().lower()
+                    .removeprefix("https://")
+                    .removeprefix("http://")
+                    .split("/", 1)[0]
+                    .split(":", 1)[0]
+                    .removeprefix("www.")
                 )
                 if selected_domain and "company_domain" in saved_contacts.columns:
-                    saved_domains = (
-                        saved_contacts["company_domain"].astype(str).str.strip().str.lower()
-                        .str.replace(r"^https?://", "", regex=True)
-                        .str.replace(r"^www\\.", "", regex=True)
-                        .str.split("/", n=1).str[0]
-                        .str.split(":", n=1).str[0]
+                    saved_domains = saved_contacts["company_domain"].map(
+                        lambda value: (
+                            str(value or "").strip().lower()
+                            .removeprefix("https://")
+                            .removeprefix("http://")
+                            .split("/", 1)[0]
+                            .split(":", 1)[0]
+                            .removeprefix("www.")
+                        )
                     )
                     company_mask |= saved_domains == selected_domain
 
