@@ -696,7 +696,90 @@ def build_campaign_report(campaign_id):
             "LinkedIn URL", "Contact Source", "Enrichment Status"
         ])
 
+    # Build a single flat report view so company metrics and each
+    # discovered person's details are visible together on the same row.
+    # Companies with multiple contacts get one row per contact; company-level
+    # traffic and lead-score values are repeated for easy filtering/export.
+    company_metrics = data.drop(
+        columns=[
+            "Discovered Contacts",
+            "Contact Persons & Job Titles",
+            "Revealed Emails",
+            "Revealed Phone Numbers",
+        ],
+        errors="ignore",
+    ).copy()
+
+    if not contacts.empty:
+        combined_contacts = contacts[
+            [
+                "company_id",
+                "Contact Name",
+                "designation",
+                "Email",
+                "Phone",
+                "linkedin_url",
+            ]
+        ].rename(columns={
+            "Contact Name": "Contact Person",
+            "designation": "Job Title",
+            "Email": "Email",
+            "Phone": "Phone Number",
+            "linkedin_url": "LinkedIn URL",
+        })
+        combined_report = company_metrics.merge(
+            combined_contacts,
+            on="company_id",
+            how="left",
+        )
+    else:
+        combined_report = company_metrics.copy()
+        combined_report["Contact Person"] = "Not revealed"
+        combined_report["Job Title"] = "Not revealed"
+        combined_report["Email"] = "Not revealed"
+        combined_report["Phone Number"] = "Not revealed"
+        combined_report["LinkedIn URL"] = "Not available"
+
+    for column in [
+        "Contact Person", "Job Title", "Email", "Phone Number",
+        "LinkedIn URL",
+    ]:
+        if column not in combined_report.columns:
+            combined_report[column] = "Not revealed"
+        combined_report[column] = (
+            combined_report[column]
+            .fillna("Not revealed")
+            .replace("", "Not revealed")
+        )
+
+    # Keep the most useful fields together at the front of the combined sheet.
+    preferred_columns = [
+        "company_name",
+        "website",
+        "monthly_visits",
+        "traffic_status",
+        "lead_score",
+        "lead_category",
+        "Contact Person",
+        "Job Title",
+        "Email",
+        "Phone Number",
+        "LinkedIn URL",
+    ]
+    combined_report = combined_report[
+        [column for column in preferred_columns if column in combined_report.columns]
+        + [
+            column for column in combined_report.columns
+            if column not in preferred_columns
+        ]
+    ]
+
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        combined_report.to_excel(
+            writer,
+            sheet_name="Combined Lead Report",
+            index=False,
+        )
         data.to_excel(writer, sheet_name="Campaign Overview", index=False)
 
         if not data.empty:
