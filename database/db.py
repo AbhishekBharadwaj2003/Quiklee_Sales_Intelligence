@@ -86,13 +86,13 @@ class _PostgresConnection:
     @staticmethod
     def _adapt_ddl(sql):
         sql = re.sub(
-            r"INTEGER\\s+PRIMARY\\s+KEY\\s+AUTOINCREMENT",
+            r"INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT",
             "BIGSERIAL PRIMARY KEY",
             sql,
             flags=re.IGNORECASE,
         )
-        sql = re.sub(r"\\bINTEGER\\b", "BIGINT", sql, flags=re.IGNORECASE)
-        sql = re.sub(r"\\bREAL\\b", "DOUBLE PRECISION", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"\bINTEGER\b", "BIGINT", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"\bREAL\b", "DOUBLE PRECISION", sql, flags=re.IGNORECASE)
         return sql
 
     def execute(self, sql, parameters=None):
@@ -105,8 +105,8 @@ class _PostgresConnection:
         else:
             statement = self._adapt_placeholders(statement)
 
-        is_insert = bool(re.match(r"^INSERT\\s+INTO\\s+", statement, re.IGNORECASE))
-        has_returning = bool(re.search(r"\\bRETURNING\\b", statement, re.IGNORECASE))
+        is_insert = bool(re.match(r"^INSERT\s+INTO\s+", statement, re.IGNORECASE))
+        has_returning = bool(re.search(r"\bRETURNING\b", statement, re.IGNORECASE))
         if is_insert and not has_returning:
             statement = statement.rstrip().rstrip(";") + " RETURNING id"
 
