@@ -519,7 +519,7 @@ def _reveal_one(path, contact_id, field):
         raise
 
 
-def render_lusha_reveal_ui(csv_path):
+def render_lusha_reveal_ui(csv_path, company_id=None, company_domain=None, company_name=None):
     path = Path(csv_path)
 
     st.subheader("Lusha Contact Reveal")
@@ -581,6 +581,27 @@ def render_lusha_reveal_ui(csv_path):
         )
     ].copy()
 
+    # The contacts CSV is shared across all brands. Restrict the reveal picker
+    # to the currently selected company, preferring the persisted company_id.
+    if company_id is not None:
+        selected_id = str(company_id).strip()
+        company_mask = pd.Series(False, index=eligible.index)
+
+        if "company_id" in eligible.columns:
+            company_mask |= eligible["company_id"].astype(str).str.strip() == selected_id
+
+        selected_domain = _normalize_domain(company_domain)
+        if selected_domain and "company_domain" in eligible.columns:
+            company_mask |= eligible["company_domain"].map(_normalize_domain) == selected_domain
+
+        if not company_mask.any() and company_name and "company_name" in eligible.columns:
+            company_mask = (
+                eligible["company_name"].astype(str).str.strip().str.casefold()
+                == str(company_name).strip().casefold()
+            )
+
+        eligible = eligible[company_mask].copy()
+
     if eligible.empty:
         st.warning(
             "No discovered contacts have both a name and a Lusha contact ID. "
@@ -607,7 +628,7 @@ def render_lusha_reveal_ui(csv_path):
         format_func=lambda row_index: eligible.loc[
             eligible["_row_index"] == row_index, "_label"
         ].iloc[0],
-        key="lusha_reveal_contact_selection",
+        key=f"lusha_reveal_contact_selection_{company_id or 'all'}",
     )
     contact = df.loc[selected_row_index].to_dict()
     contact_id = _clean(contact.get("lusha_contact_id"))
