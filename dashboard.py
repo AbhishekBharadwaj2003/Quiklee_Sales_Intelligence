@@ -22,7 +22,7 @@ from database.campaign_research_controller import (
 from database.campaign_linker import link_campaign_companies
 from enrichment.lusha_reveal_ui import render_lusha_reveal_ui
 from enrichment.lusha_discovery_ui import render_lusha_discovery_ui
-from campaign_workflow import get_campaign_traffic_candidates, run_single_company_traffic_validation, score_campaign_leads, get_campaign_intelligence, build_campaign_report, reset_campaign_traffic_to_pending
+from campaign_workflow import get_campaign_traffic_candidates, run_all_pending_traffic_validation, score_campaign_leads, get_campaign_intelligence, build_campaign_report, reset_campaign_traffic_to_pending
 
 from database.campaign_repository import (
     create_campaign,
@@ -1034,146 +1034,128 @@ elif page == "Campaign Management":
 
 
         st.divider()
-        st.subheader("7. Validate website traffic with TabAPI")
+        st.subheader("7. Validate all pending companies with TabAPI")
         st.caption(
-            "Choose one company at a time. Selecting a company does not use credits; "
-            "only clicking the research button sends one TabAPI request."
+            "Run traffic validation for every pending company in this campaign "
+            "with one approval. Each company is queried separately and saved "
+            "immediately before the next lookup begins."
         )
 
         campaign_id = selected_campaign["id"]
         tabapi_candidates = get_campaign_traffic_candidates(campaign_id)
+        valid_domain_candidates = [
+            item for item in tabapi_candidates if item.get("domain")
+        ]
+        missing_website_count = len(tabapi_candidates) - len(valid_domain_candidates)
 
-        tabapi_result_key = "tabapi_single_result_" + str(campaign_id)
-        tabapi_error_key = "tabapi_single_error_" + str(campaign_id)
-
-        selected_company_id = None
+        metric_col1, metric_col2, metric_col3 = st.columns(3)
+        metric_col1.metric("Pending companies", len(tabapi_candidates))
+        metric_col2.metric("TabAPI requests expected", len(valid_domain_candidates))
+        metric_col3.metric("Missing / invalid websites", missing_website_count)
 
         if tabapi_candidates:
-            candidate_by_id = {
-                item["company_id"]: item for item in tabapi_candidates
-            }
-
-            selected_company_id = st.selectbox(
-                "Select a company for traffic research",
-                options=list(candidate_by_id.keys()),
-                format_func=lambda company_id: (
-                    candidate_by_id[company_id]["company_name"]
-                    + " — "
-                    + (
-                        candidate_by_id[company_id]["domain"]
-                        or "Website missing"
-                    )
-                ),
-                key="tabapi_company_select_" + str(campaign_id),
+            st.info(
+                f"Estimated maximum TabAPI lookups: **{len(valid_domain_candidates)}**. "
+                "Actual credits are determined by TabAPI and reported in each response; "
+                "the app cannot guarantee a one-credit-per-request rate."
             )
 
-            selected_company = candidate_by_id[selected_company_id]
+            with st.expander("Preview companies to be processed", expanded=False):
+                preview = pd.DataFrame([
+                    {
+                        "Company": item["company_name"],
+                        "Website": item.get("website") or "Not available",
+                        "Domain": item.get("domain") or "Invalid / missing",
+                    }
+                    for item in tabapi_candidates
+                ])
+                st.dataframe(
+                    preview,
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
-            detail_col1, detail_col2 = st.columns(2)
-            with detail_col1:
-                st.write("**Website**")
-                st.write(selected_company["website"] or "Not available")
-            with detail_col2:
-                st.write("**Current status**")
-                st.write(selected_company["traffic_status"].replace("_", " ").title())
-
-            approve_tabapi = st.checkbox(
-                "I approve one TabAPI traffic lookup for the selected company. This request may consume API credits.",
-                key="approve_tabapi_single_" + str(campaign_id),
+            approve_tabapi_bulk = st.checkbox(
+                "I approve TabAPI traffic lookups for all pending companies above. "
+                "Each valid domain may consume API credits.",
+                key="approve_tabapi_bulk_" + str(campaign_id),
             )
 
             if st.button(
-                "Research selected company",
+                "Validate all pending companies",
                 type="primary",
-                disabled=not approve_tabapi,
-                key="validate_tabapi_single_" + str(campaign_id),
+                disabled=not approve_tabapi_bulk,
+                key="validate_all_tabapi_" + str(campaign_id),
             ):
-                st.session_state.pop(tabapi_result_key, None)
-                st.session_state.pop(tabapi_error_key, None)
+                progress_bar = st.progress(0)
+                progress_text = st.empty()
+                live_result = st.empty()
+
+                def update_tabapi_progress(completed, total, result):
+                    progress_bar.progress(
+                        completed / total if total else 1.0
+                    )
+                    progress_text.write(
+                        f"Processing {completed}/{total}: "
+                        f"{result.get('company', 'Company')} "
+                        f"— {result.get('traffic_status', 'pending').replace('_', ' ').title()}"
+                    )
+                    if result.get("error"):
+                        live_result.warning(
+                            f"{result.get('company')}: {result['error']}"
+                        )
+                    else:
+                        live_result.caption(
+                            f"{result.get('company')}: "
+                            f"{result.get('monthly_visits'):,.0f} monthly visits "
+                            f"({result.get('traffic_status')})"
+                            if result.get("monthly_visits") is not None
+                            else f"{result.get('company')}: no traffic figure returned."
+                        )
 
                 try:
-                    with st.spinner(
-                        "Checking "
-                        + selected_company["company_name"]
-                        + " with TabAPI..."
-                    ):
-                        st.session_state[tabapi_result_key] = (
-                            run_single_company_traffic_validation(
-                                campaign_id,
-                                selected_company_id,
-                            )
+                    with st.spinner("Validating the campaign's pending companies..."):
+                        bulk_result = run_all_pending_traffic_validation(
+                            campaign_id,
+                            progress_callback=update_tabapi_progress,
                         )
+                    st.session_state[
+                        "tabapi_bulk_result_" + str(campaign_id)
+                    ] = bulk_result
+                    st.success(
+                        f"Bulk validation finished. "
+                        f"{bulk_result['qualified']} qualified, "
+                        f"{bulk_result['below_threshold']} below threshold, "
+                        f"{bulk_result['failed']} failed / pending. "
+                        f"{bulk_result['requests_made']} TabAPI requests made."
+                    )
+                    st.rerun()
                 except Exception as error:
-                    st.session_state[tabapi_error_key] = {
-                        "company_id": selected_company_id,
-                        "company": selected_company["company_name"],
-                        "message": type(error).__name__ + ": " + str(error),
-                    }
-
-                st.rerun()
+                    st.error(
+                        "Bulk TabAPI validation stopped unexpectedly: "
+                        f"{type(error).__name__}: {error}. "
+                        "Any company results saved before the error remain in the database."
+                    )
 
         else:
             st.success(
-                "There are no companies awaiting TabAPI traffic validation "
-                "in this campaign."
+                "There are no pending companies awaiting TabAPI traffic validation."
             )
 
-        # Display a result only when it belongs to the currently selected company.
-        saved_tabapi_result = st.session_state.get(tabapi_result_key)
-        if (
-            saved_tabapi_result
-            and selected_company_id is not None
-            and saved_tabapi_result.get("company_id") == selected_company_id
-        ):
-            if saved_tabapi_result.get("traffic_status") == "qualified":
-                st.success(
-                    saved_tabapi_result["company"]
-                    + " qualified with "
-                    + f'{saved_tabapi_result["monthly_visits"]:,.0f}'
-                    + " monthly visits."
-                )
-            elif saved_tabapi_result.get("traffic_status") == "below_threshold":
-                st.warning(
-                    saved_tabapi_result["company"]
-                    + " is below the required traffic threshold. "
-                    + f'{saved_tabapi_result["monthly_visits"]:,.0f}'
-                    + " monthly visits."
-                )
-            else:
-                st.error(
-                    saved_tabapi_result.get("error")
-                    or "TabAPI did not return a usable traffic figure. "
-                       "The company remains pending."
-                )
-
+        previous_bulk_result = st.session_state.get(
+            "tabapi_bulk_result_" + str(campaign_id)
+        )
+        if previous_bulk_result:
+            st.caption("Most recent bulk validation results")
             st.dataframe(
-                pd.DataFrame([saved_tabapi_result]),
+                pd.DataFrame(previous_bulk_result.get("results", [])),
                 use_container_width=True,
                 hide_index=True,
             )
 
-        saved_tabapi_error = st.session_state.get(tabapi_error_key)
-        if (
-            saved_tabapi_error
-            and selected_company_id is not None
-            and saved_tabapi_error.get("company_id") == selected_company_id
-        ):
-            st.error(
-                "TabAPI lookup failed for "
-                + saved_tabapi_error["company"]
-                + ": "
-                + saved_tabapi_error["message"]
-            )
-
-        remaining_count = len(get_campaign_traffic_candidates(campaign_id))
         st.caption(
-            str(remaining_count)
-            + " companies are currently awaiting individual TabAPI validation."
-        )
-
-        st.caption(
-            "Only successful TabAPI results are saved as verified traffic. "
-            "A lookup error does not qualify or disqualify a company. "
+            "Only successful traffic results are saved as verified traffic. "
+            "Failed lookups remain pending and can be retried later. "
             "The qualification rule is strictly greater than 100,000 monthly visits."
         )
 
@@ -1196,11 +1178,48 @@ elif page == "Campaign Management":
             )
             st.rerun()
 
-        st.subheader("8. Calculate lead scores")
-        if st.button("Score qualified companies", key="score_campaign_" + str(selected_campaign["id"])):
-            score_results = score_campaign_leads(selected_campaign["id"])
-            st.dataframe(pd.DataFrame(score_results), use_container_width=True, hide_index=True)
-            st.success("Lead scoring completed for eligible companies.")
+        st.subheader("8. Calculate lead scores for all eligible companies")
+        st.caption(
+            "This processes every unique company in the campaign. Only companies "
+            "with verified traffic above 100,000 monthly visits are scored."
+        )
+        if st.button(
+            "Score all traffic-qualified companies",
+            type="primary",
+            key="score_campaign_" + str(selected_campaign["id"]),
+        ):
+            score_progress = st.progress(0)
+            score_status = st.empty()
+
+            def update_score_progress(completed, total, result):
+                score_progress.progress(
+                    completed / total if total else 1.0
+                )
+                score_status.write(
+                    f"Scoring {completed}/{total}: "
+                    f"{result.get('company_name') or result.get('company_id')} "
+                    f"— {result.get('qualification_status', 'processed')}"
+                )
+
+            score_results = score_campaign_leads(
+                selected_campaign["id"],
+                progress_callback=update_score_progress,
+            )
+            score_frame = pd.DataFrame(score_results)
+            st.dataframe(
+                score_frame,
+                use_container_width=True,
+                hide_index=True,
+            )
+            scored_count = sum(
+                item.get("qualification_status") in {"complete", "provisional"}
+                for item in score_results
+            )
+            not_scored_count = len(score_results) - scored_count
+            st.success(
+                f"Campaign scoring finished: {scored_count} scored; "
+                f"{not_scored_count} skipped or unsuccessful."
+            )
             st.rerun()
 
         st.subheader("9. Live Research")
