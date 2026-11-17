@@ -185,6 +185,111 @@ def get_db():
         connection.close()
 
 
+def _migrate_existing_sqlite_data():
+    """One-time import of an existing local SQLite database into PostgreSQL.
+
+    This only runs when DATABASE_URL is configured and the old SQLite file is
+    present beside the application. Rows are copied in foreign-key order and
+    conflicts are ignored, so restarting the app does not duplicate records.
+    """
+    if not DATABASE_PATH.exists():
+        print("No local SQLite database found; skipping legacy data migration.")
+        return
+
+    tables_to_copy = (
+        "companies",
+        "research_history",
+        "company_events",
+        "company_contacts",
+        "campaigns",
+        "campaign_records",
+        "contact_reveal_ledger",
+    )
+
+    source = sqlite3.connect(DATABASE_PATH, timeout=30)
+    source.row_factory = sqlite3.Row
+
+    try:
+        available_tables = {
+            row["name"]
+            for row in source.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+
+        with get_db() as target:
+            target.execute("""
+                CREATE TABLE IF NOT EXISTS app_migrations (
+                    id BIGSERIAL PRIMARY KEY,
+                    migration_key TEXT NOT NULL UNIQUE,
+                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            already_migrated = target.execute(
+                "SELECT id FROM app_migrations WHERE migration_key = ?",
+                ("sqlite_to_supabase_v1",),
+            ).fetchone()
+            if already_migrated:
+                print("Legacy SQLite migration was already completed.")
+                return
+
+            copied_counts = {}
+            for table_name in tables_to_copy:
+                if table_name not in available_tables:
+                    continue
+
+                rows = source.execute(
+                    f'SELECT * FROM "{table_name}"'
+                ).fetchall()
+                if not rows:
+                    copied_counts[table_name] = 0
+                    continue
+
+                columns = [item["name"] for item in source.execute(
+                    f'PRAGMA table_info("{table_name}")'
+                ).fetchall()]
+                column_sql = ", ".join(f'"{name}"' for name in columns)
+                placeholders = ", ".join("?" for _ in columns)
+                insert_sql = (
+                    f'INSERT INTO "{table_name}" ({column_sql}) '
+                    f'VALUES ({placeholders}) ON CONFLICT DO NOTHING'
+                )
+
+                inserted = 0
+                for row in rows:
+                    result = target.execute(insert_sql, tuple(row))
+                    if result.rowcount > 0:
+                        inserted += 1
+
+                copied_counts[table_name] = inserted
+
+                if "id" in columns:
+                    target.execute(
+                        f"""
+                        SELECT setval(
+                            pg_get_serial_sequence('{table_name}', 'id'),
+                            COALESCE((SELECT MAX(id) FROM "{table_name}"), 1),
+                            EXISTS(SELECT 1 FROM "{table_name}")
+                        )
+                        """
+                    )
+
+            target.execute(
+                """
+                INSERT INTO app_migrations (migration_key)
+                VALUES (?)
+                ON CONFLICT (migration_key) DO NOTHING
+                """,
+                ("sqlite_to_supabase_v1",),
+            )
+
+        print("Legacy SQLite migration completed:", copied_counts)
+
+    finally:
+        source.close()
+
+
 def initialize_database():
     """Create the application's core tables in PostgreSQL or local SQLite."""
     using_postgres = bool(_get_database_url())
@@ -350,6 +455,7 @@ def initialize_database():
         """)
 
     if using_postgres:
+        _migrate_existing_sqlite_data()
         print("Quiklee PostgreSQL database initialized successfully.")
         print("Database backend: Supabase PostgreSQL")
     else:
