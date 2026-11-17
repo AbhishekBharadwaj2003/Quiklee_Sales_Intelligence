@@ -670,7 +670,7 @@ elif page == "Campaign Management":
                     ],
                 )
 
-                st.subheader("2. Confirm column mapping")
+                st.subheader("Confirm column mapping")
 
                 st.caption(
                     "Check the detected columns. "
@@ -723,7 +723,7 @@ elif page == "Campaign Management":
 
                 st.divider()
 
-                st.subheader("3. Create campaign")
+                st.subheader("Create campaign")
 
                 st.caption(
                     "Every non-empty brand row will be saved separately. "
@@ -865,7 +865,7 @@ elif page == "Campaign Management":
     # CAMPAIGN HISTORY
     # --------------------------------------------------
 
-    st.subheader("4. Campaign history")
+    st.subheader("2. Campaign history")
     campaigns = get_all_campaigns()
     if not campaigns:
         st.info("No campaigns created yet. Upload a dataset above to create your first campaign.")
@@ -907,7 +907,7 @@ elif page == "Campaign Management":
 
         st.divider()
 
-        st.subheader("5. Inspect campaign records")
+        st.subheader("3. Inspect campaign records")
 
         selected_campaign = st.selectbox(
             "Select campaign",
@@ -996,7 +996,7 @@ elif page == "Campaign Management":
 
 
         st.divider()
-        st.subheader("6. Company Research Queue")
+        st.subheader("4. Company Research Queue")
 
         research_queue = get_campaign_research_queue(
             selected_campaign["id"]
@@ -1091,7 +1091,7 @@ elif page == "Campaign Management":
 
 
         st.divider()
-        st.subheader("7. Validate all pending companies with TabAPI")
+        st.subheader("5. Validate all pending companies with TabAPI")
         st.caption(
             "Run traffic validation for every pending company in this campaign "
             "with one approval. Each company is queried separately and saved "
@@ -1237,7 +1237,7 @@ elif page == "Campaign Management":
             )
             st.rerun()
 
-        st.subheader("8. Calculate lead scores for all eligible companies")
+        st.subheader("6. Calculate lead scores for all eligible companies")
         st.caption(
             "This processes every unique company in the campaign. Only companies "
             "with verified traffic above 100,000 monthly visits are scored."
@@ -1281,7 +1281,7 @@ elif page == "Campaign Management":
             )
             st.rerun()
 
-        st.subheader("9. Live Research")
+        st.subheader("7. Live Research")
 
         st.caption(
             "Review the plan first. Live execution only starts after explicit "
