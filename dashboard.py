@@ -48,8 +48,15 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Create the SQLite schema on first cloud startup.
-initialize_database()
+# Initialize the database once per Streamlit server process.
+# Streamlit reruns this script on every interaction; caching prevents repeated
+# Supabase connections, schema checks, and legacy migration checks.
+@st.cache_resource(show_spinner="Connecting to the Quiklee database...")
+def initialize_database_once():
+    initialize_database()
+
+
+initialize_database_once()
 
 FILES = {
     "crm": DATA_DIR / "Quiklee Sales CRM - Leads.csv",
