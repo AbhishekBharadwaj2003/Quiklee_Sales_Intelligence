@@ -261,14 +261,13 @@ if st.sidebar.button("Refresh all data", use_container_width=True):
 page = st.sidebar.radio(
     "NAVIGATION",
     [
-        "Overview",
-        "CRM Lead Management",
         "Lead Prioritisation",
         "Contact Intelligence",
         "Website Intelligence",
         "Campaign Management",
         "Reports",
     ],
+    index=3,
 )
 
 st.sidebar.divider()
