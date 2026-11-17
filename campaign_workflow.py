@@ -77,6 +77,7 @@ def get_campaign_traffic_candidates(campaign_id):
                 "domain": _normalise_domain(website),
                 "monthly_visits": item.get("monthly_visits"),
                 "traffic_status": item.get("traffic_status") or "pending",
+                "_statuses": set(),
             }
         else:
             # Prefer a row with a usable website if the first duplicate lacked one.
@@ -85,15 +86,22 @@ def get_campaign_traffic_candidates(campaign_id):
                 candidates[company_id]["website"] = website
                 candidates[company_id]["domain"] = _normalise_domain(website)
 
-    return [
-        item
-        for item in candidates.values()
-        if item["traffic_status"] not in (
-            "qualified",
-            "below_threshold",
-            "manual_review",
+        candidates[company_id]["_statuses"].add(
+            str(item.get("traffic_status") or "pending").strip().lower()
         )
-    ]
+
+    terminal_statuses = {"qualified", "below_threshold", "manual_review"}
+    pending = []
+    for item in candidates.values():
+        # If any duplicate row already has a terminal result, never charge for
+        # that company again. This prevents duplicate campaign rows re-triggering
+        # an already completed TabAPI lookup.
+        if item["_statuses"] & terminal_statuses:
+            continue
+        item.pop("_statuses", None)
+        pending.append(item)
+
+    return pending
 
 
 def run_single_company_traffic_validation(campaign_id, company_id, months=3):
@@ -243,6 +251,87 @@ def run_single_company_traffic_validation(campaign_id, company_id, months=3):
     }
 
 
+def run_all_pending_traffic_validation(
+    campaign_id,
+    months=3,
+    progress_callback=None,
+):
+    """
+    Validate every pending company in a campaign sequentially.
+
+    Each successful result is persisted by run_single_company_traffic_validation
+    before the next company starts. A failure is recorded in the returned
+    results and does not stop the remaining companies.
+
+    progress_callback, when supplied, is called as:
+        progress_callback(completed, total, result)
+    """
+    candidates = get_campaign_traffic_candidates(campaign_id)
+    total = len(candidates)
+    results = []
+
+    for index, candidate in enumerate(candidates, start=1):
+        company_id = candidate["company_id"]
+        company_name = candidate["company_name"]
+        domain = candidate.get("domain") or ""
+
+        if not domain:
+            result = {
+                "company_id": company_id,
+                "company": company_name,
+                "domain": "",
+                "monthly_visits": None,
+                "traffic_status": "pending",
+                "credits_charged": 0,
+                "error": "Official website is missing or invalid; no TabAPI request was made.",
+                "requests_made": 0,
+            }
+        else:
+            try:
+                result = run_single_company_traffic_validation(
+                    campaign_id,
+                    company_id,
+                    months=months,
+                )
+            except Exception as error:
+                result = {
+                    "company_id": company_id,
+                    "company": company_name,
+                    "domain": domain,
+                    "monthly_visits": None,
+                    "traffic_status": "pending",
+                    "credits_charged": 0,
+                    "error": f"{type(error).__name__}: {error}",
+                    "requests_made": 0,
+                }
+
+        results.append(result)
+
+        if progress_callback:
+            progress_callback(index, total, result)
+
+    return {
+        "campaign_id": campaign_id,
+        "total_pending": total,
+        "processed": len(results),
+        "qualified": sum(
+            item.get("traffic_status") == "qualified" for item in results
+        ),
+        "below_threshold": sum(
+            item.get("traffic_status") == "below_threshold" for item in results
+        ),
+        "failed": sum(
+            item.get("traffic_status") == "pending" for item in results
+        ),
+        "requests_made": sum(item.get("requests_made", 0) for item in results),
+        "results": results,
+        "note": (
+            "Each successful lookup is saved immediately. Existing qualified, "
+            "below-threshold and manual-review companies are skipped."
+        ),
+    }
+
+
 def run_campaign_traffic_validation(campaign_id, months=3, batch_size=1):
     """
     Temporary compatibility wrapper for the old dashboard.
@@ -290,8 +379,12 @@ def run_campaign_traffic_validation(campaign_id, months=3, batch_size=1):
     }
 
 
-def score_campaign_leads(campaign_id):
-    """Score every unique traffic-qualified company in a campaign."""
+def score_campaign_leads(campaign_id, progress_callback=None):
+    """Score every unique traffic-qualified company in a campaign.
+
+    progress_callback, when supplied, is called as:
+        progress_callback(completed, total, result)
+    """
     with get_db() as connection:
         rows = connection.execute(
             """
@@ -312,7 +405,9 @@ def score_campaign_leads(campaign_id):
         for item in get_campaign_research_queue(campaign_id)
     }
 
-    for row in rows:
+    total = len(rows)
+
+    for index, row in enumerate(rows, start=1):
         company_id = row["company_id"]
 
         try:
@@ -349,6 +444,9 @@ def score_campaign_leads(campaign_id):
                 "qualification_status": "not_scored",
                 "error": str(error),
             })
+
+        if progress_callback:
+            progress_callback(index, total, results[-1])
 
     return results
 
