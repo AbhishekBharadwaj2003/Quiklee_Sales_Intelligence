@@ -492,15 +492,60 @@ elif page == "Contact Intelligence":
         if FILES["lusha"].exists():
             saved_contacts = pd.read_csv(FILES["lusha"], dtype=str).fillna("")
             if not saved_contacts.empty:
-                display_cols = [col for col in [
-                    "contact_name", "designation", "company_name",
-                    "revealed_emails", "revealed_phones",
-                    "linkedin_url", "lusha_contact_id",
-                    "email_reveal_status", "phone_reveal_status",
-                    "enrichment_status"
-                ] if col in saved_contacts.columns]
-                display_table(saved_contacts[display_cols], 350)
-                render_lusha_reveal_ui(FILES["lusha"])
+                # The CSV is a shared store for all researched brands. Show
+                # only records belonging to the selected company.
+                selected_company_id = str(company["id"])
+                company_mask = pd.Series(False, index=saved_contacts.index)
+
+                if "company_id" in saved_contacts.columns:
+                    company_mask |= (
+                        saved_contacts["company_id"].astype(str).str.strip()
+                        == selected_company_id
+                    )
+
+                selected_domain = re.sub(
+                    r"^www\\.", "",
+                    re.sub(r"^https?://", "", str(company.get("website_url") or "").strip().lower())
+                    .split("/", 1)[0].split(":", 1)[0],
+                )
+                if selected_domain and "company_domain" in saved_contacts.columns:
+                    saved_domains = (
+                        saved_contacts["company_domain"].astype(str).str.strip().str.lower()
+                        .str.replace(r"^https?://", "", regex=True)
+                        .str.replace(r"^www\\.", "", regex=True)
+                        .str.split("/", n=1).str[0]
+                        .str.split(":", n=1).str[0]
+                    )
+                    company_mask |= saved_domains == selected_domain
+
+                if not company_mask.any() and "company_name" in saved_contacts.columns:
+                    company_mask = (
+                        saved_contacts["company_name"].astype(str).str.strip().str.casefold()
+                        == str(company["company_name"]).strip().casefold()
+                    )
+
+                company_contacts = saved_contacts[company_mask].copy()
+
+                if not company_contacts.empty:
+                    display_cols = [col for col in [
+                        "contact_name", "designation", "company_name",
+                        "revealed_emails", "revealed_phones",
+                        "linkedin_url", "lusha_contact_id",
+                        "email_reveal_status", "phone_reveal_status",
+                        "enrichment_status"
+                    ] if col in company_contacts.columns]
+                    display_table(company_contacts[display_cols], 350)
+                    render_lusha_reveal_ui(
+                        FILES["lusha"],
+                        company_id=company["id"],
+                        company_domain=company.get("website_url"),
+                        company_name=company["company_name"],
+                    )
+                else:
+                    st.info(
+                        f"No contacts have been discovered for {company['company_name']} yet. "
+                        "Search Lusha above to add contacts for this company."
+                    )
             else:
                 st.info("No contact records saved yet.")
         else:
