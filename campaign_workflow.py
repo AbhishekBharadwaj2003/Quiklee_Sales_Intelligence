@@ -276,6 +276,23 @@ def run_all_pending_traffic_validation(
         domain = candidate.get("domain") or ""
 
         if not domain:
+            error_message = (
+                "Official website is missing or invalid; no TabAPI request was made."
+            )
+            add_research_record(
+                company_id,
+                "traffic_analysis",
+                "TabAPI",
+                {
+                    "traffic_status": "unavailable",
+                    "research_status": "unavailable",
+                    "eligibility_status": "pending",
+                    "error": error_message,
+                    "campaign_id": campaign_id,
+                    "requests_made": 0,
+                },
+                source_url=candidate.get("website") or None,
+            )
             result = {
                 "company_id": company_id,
                 "company": company_name,
@@ -283,7 +300,7 @@ def run_all_pending_traffic_validation(
                 "monthly_visits": None,
                 "traffic_status": "pending",
                 "credits_charged": 0,
-                "error": "Official website is missing or invalid; no TabAPI request was made.",
+                "error": error_message,
                 "requests_made": 0,
             }
         else:
