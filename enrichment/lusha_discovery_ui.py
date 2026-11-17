@@ -296,6 +296,12 @@ def render_lusha_discovery_ui(output_path, company_id, company_name, website_url
             ]
             contacts = [item for item in contacts if item]
 
+            # Persist the owning company ID with every discovered contact.
+            # The shared CSV contains multiple brands, so this key is essential
+            # for isolating each company's contacts in the UI and reports.
+            for contact in contacts:
+                contact["company_id"] = str(company_id)
+
             if not contacts:
                 st.warning(
                     "Lusha returned no usable contact records. "
