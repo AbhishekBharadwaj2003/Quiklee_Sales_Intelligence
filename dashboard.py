@@ -1056,8 +1056,9 @@ elif page == "Campaign Management":
         if tabapi_candidates:
             st.info(
                 f"Estimated maximum TabAPI lookups: **{len(valid_domain_candidates)}**. "
-                "Actual credits are determined by TabAPI and reported in each response; "
-                "the app cannot guarantee a one-credit-per-request rate."
+                "This is the maximum number of external requests, not a guaranteed "
+                "credit count. TabAPI determines the actual credits charged and "
+                "returns that value with each successful response."
             )
 
             with st.expander("Preview companies to be processed", expanded=False):
