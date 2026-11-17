@@ -1169,8 +1169,9 @@ elif page == "Campaign Management":
             key="reset_traffic_" + str(campaign_id),
         ):
             reset_count = reset_campaign_traffic_to_pending(campaign_id)
-            st.session_state.pop(tabapi_result_key, None)
-            st.session_state.pop(tabapi_error_key, None)
+            st.session_state.pop(
+                "tabapi_bulk_result_" + str(campaign_id), None
+            )
             st.success(
                 str(reset_count)
                 + " campaign records returned to pending. "
