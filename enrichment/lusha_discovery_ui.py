@@ -516,4 +516,93 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
     st.success(f"Bulk discovery completed. {saved_count} new contacts saved; {no_match} brands had no match or were skipped.")
     if results:
         st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
-    st.caption("Contact details were not revealed. Review saved contacts before any paid reveal operation.")
+
+    # Bulk email reveal is a separate, explicitly approved paid action.
+    st.divider()
+    st.subheader("Bulk email reveal")
+    st.caption(
+        "Reveal email addresses for contacts discovered in this dataset. "
+        "Each contact is processed individually using the existing brand-level safety ledger. "
+        "Email reveals may consume credits; phone numbers are not requested."
+    )
+    email_approval = st.checkbox(
+        "I approve email reveal requests for all eligible contacts in this dataset. These requests may consume Lusha credits.",
+ 
+        key=f"pq_bulk_email_approve_{batch_label}",
+    )
+    if st.button(
+        "Reveal emails for all discovered contacts in this dataset",
+        disabled=not email_approval,
+        type="primary",
+        key=f"pq_bulk_email_reveal_{batch_label}",
+    ):
+        try:
+            from enrichment.lusha_reveal_ui import _reveal_one
+
+            contacts_df = pd.read_csv(output_path, dtype=str).fillna("")
+            batch_contacts = contacts_df[
+                contacts_df.get("bulk_dataset", pd.Series("", index=contacts_df.index)).astype(str)
+                == str(batch_label)
+            ].copy()
+            eligible_contacts = batch_contacts[
+                batch_contacts.get("lusha_contact_id", pd.Series("", index=batch_contacts.index)).astype(str).str.strip() != ""
+            ]
+            reveal_progress = st.progress(0)
+            reveal_status = st.empty()
+            reveal_results = []
+            for reveal_idx, (_, contact_row) in enumerate(eligible_contacts.iterrows()):
+                contact_id = str(contact_row.get("lusha_contact_id", "")).strip()
+                contact_name = str(contact_row.get("contact_name", "")).strip()
+                brand_name = str(contact_row.get("company_name", "")).strip()
+                reveal_status.text(
+                    f"Revealing email {reveal_idx + 1}/{len(eligible_contacts)}: {brand_name}"
+                )
+                existing_email = str(contact_row.get("revealed_emails", "")).strip()
+                prior_status = str(contact_row.get("emails_reveal_status", "")).strip()
+                if existing_email:
+                    reveal_results.append({"brand": brand_name, "contact": contact_name, "email": existing_email, "status": "Already revealed"})
+                elif prior_status:
+                    reveal_results.append({"brand": brand_name, "contact": contact_name, "email": "", "status": f"Skipped — prior status: {prior_status}"})
+                else:
+                    try:
+                        values, credits = _reveal_one(output_path, contact_id, "emails")
+                        reveal_results.append({
+                            "brand": brand_name,
+                            "contact": contact_name,
+                            "email": "; ".join(values or []),
+                            "status": f"Revealed ({credits} credits)" if values else f"No email returned ({credits} credits)",
+                        })
+                    except Exception as reveal_error:
+                        reveal_results.append({
+                            "brand": brand_name,
+                            "contact": contact_name,
+                            "email": "",
+                            "status": f"Reveal error — check billing: {type(reveal_error).__name__}",
+                        })
+                reveal_progress.progress((reveal_idx + 1) / max(len(eligible_contacts), 1))
+            reveal_status.empty()
+            reveal_progress.empty()
+            st.write("**Bulk email reveal results**")
+            st.dataframe(pd.DataFrame(reveal_results), use_container_width=True, hide_index=True)
+            st.cache_data.clear()
+        except Exception as bulk_error:
+            st.error(f"Bulk email reveal failed: {type(bulk_error).__name__}: {bulk_error}")
+
+    # Display the saved contact rows for this dataset, including revealed email values.
+    if output_path.exists():
+        saved_contacts_df = pd.read_csv(output_path, dtype=str).fillna("")
+        dataset_contacts = saved_contacts_df[
+            saved_contacts_df.get("bulk_dataset", pd.Series("", index=saved_contacts_df.index)).astype(str)
+            == str(batch_label)
+        ].copy()
+        if not dataset_contacts.empty:
+            for column in ("contact_name", "designation", "company_name", "revealed_emails", "linkedin_url"):
+                if column not in dataset_contacts.columns:
+                    dataset_contacts[column] = ""
+            st.write("**Discovered contacts for this dataset**")
+            st.dataframe(
+                dataset_contacts[["company_name", "contact_name", "designation", "revealed_emails", "linkedin_url"]],
+                use_container_width=True,
+                hide_index=True,
+            )
+    st.caption("Bulk email reveal is separate from discovery; phone numbers are not revealed.")
