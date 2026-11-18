@@ -666,6 +666,7 @@ elif page == "Pre-Qualified Leads":
                             pq_brand_column,
                             None if pq_website_column == "Not available" else pq_website_column,
                             pq_visitor_column,
+                            pq_batch_name,
                         )
                         st.success("Pre-qualified dataset imported. No TabAPI requests were made.")
                         a, b, c, d = st.columns(4)
