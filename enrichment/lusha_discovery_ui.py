@@ -463,7 +463,7 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
             if not domain:
                 final_rows.append({
                     "brand": brand_name, "contact": "", "designation": "",
-                    "email": "", "LinkedIn": "", "status": "Skipped — missing website/domain",
+                    "email": "", "phone": "", "LinkedIn": "", "status": "Skipped — missing website/domain",
                 })
                 progress.progress((brand_idx + 1) / len(companies))
                 continue
@@ -483,7 +483,7 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
                 except Exception as search_error:
                     final = {
                         "brand": brand_name, "contact": "", "designation": "",
-                        "email": "", "LinkedIn": "",
+                        "email": "", "phone": "", "LinkedIn": "",
                         "status": f"Prospecting error in {category}: {type(search_error).__name__}",
                     }
                     stop_on_error = True
@@ -614,7 +614,7 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
             if final is None:
                 final = {
                     "brand": brand_name, "contact": "", "designation": "",
-                    "email": "", "LinkedIn": "", "status": "No matching contact found",
+                    "email": "", "phone": "", "LinkedIn": "", "status": "No matching contact found",
                 }
             if not final.get("email"):
                 no_email_count += 1
@@ -628,7 +628,11 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
             f"{no_email_count} did not."
         )
         if final_rows:
-            st.dataframe(pd.DataFrame(final_rows), use_container_width=True, hide_index=True)
+            result_df = pd.DataFrame(final_rows)
+            for column in ("brand", "contact", "designation", "email", "phone", "LinkedIn", "status"):
+                if column not in result_df.columns:
+                    result_df[column] = ""
+            st.dataframe(result_df[["brand", "contact", "designation", "email", "phone", "LinkedIn", "status"]], use_container_width=True, hide_index=True)
 
     # Always render saved results on Streamlit reruns, independent of the action button.
     if output_path.exists():
@@ -638,13 +642,13 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
             == str(batch_label)
         ].copy()
         if not dataset_contacts.empty:
-            for column in ("company_name", "contact_name", "designation", "revealed_emails", "linkedin_url"):
+            for column in ("company_name", "contact_name", "designation", "revealed_emails", "revealed_phones", "linkedin_url"):
                 if column not in dataset_contacts.columns:
                     dataset_contacts[column] = ""
             st.write("**Contacts and emails saved for this dataset**")
             st.dataframe(
-                dataset_contacts[["company_name", "contact_name", "designation", "revealed_emails", "linkedin_url"]],
+                dataset_contacts[["company_name", "contact_name", "designation", "revealed_emails", "revealed_phones", "linkedin_url"]],
                 use_container_width=True,
                 hide_index=True,
             )
-    st.caption("Phone numbers are not requested or revealed in this workflow.")
+    st.caption("Phone reveal is attempted for the selected contact after an email is found; phone reveal errors do not trigger another designation search.")
