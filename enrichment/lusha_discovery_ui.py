@@ -500,7 +500,10 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
                 raw_path = _save_raw_response(output_path, payload, raw_response, company.get("id"), brand, domain)
             except Exception as ex:
                 errors += 1
-                results.append({"BRAND":brand,"Contact Person 1":"","DESIGNATION 1":"","EMAIL":"","CONTACT PERSON 2":"","DESIGNATION 2":"","PHONE NUMBER":"","LinkedIn 1":"","LinkedIn 2":"","Status":f"Prospecting error: {type(ex).__name__}"})
+                error_detail = str(ex).replace(str(LUSHA_API_KEY), "[REDACTED]")[:300]
+                error_status = f"Prospecting error: {type(ex).__name__}: {error_detail}"
+                results.append({"BRAND":brand,"Contact Person 1":"","DESIGNATION 1":"","EMAIL":"","CONTACT PERSON 2":"","DESIGNATION 2":"","PHONE NUMBER":"","LinkedIn 1":"","LinkedIn 2":"","Status":error_status})
+                status_box.text(f"{idx+1}/{len(companies)} — {brand}: ERROR — {error_status}")
                 progress.progress((idx+1)/len(companies))
                 continue
 
@@ -571,6 +574,8 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
         status_box.empty()
         progress.empty()
         st.success(f"Run finished: {len(companies)} brands processed. {complete} brands returned both email and phone. {errors} brands incomplete or errored.")
+        if errors:
+            st.warning("Open the Status column in the results below. It now includes the actual API error detail (with API key redacted) so we can identify the cause.")
         if results:
             st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
 
