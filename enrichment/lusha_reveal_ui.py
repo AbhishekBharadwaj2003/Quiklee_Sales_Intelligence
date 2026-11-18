@@ -426,7 +426,7 @@ def _sync_revealed_value_to_database(contact, field, values):
         return cursor.rowcount
 
 
-def _reveal_one(path, contact_id, field):
+def _reveal_one(path, contact_id, field, timeout=45):
     # Seed known historical reveals before attempting a new request.
     _seed_historical_reveals(path)
 
@@ -441,7 +441,7 @@ def _reveal_one(path, contact_id, field):
     _save_contacts(df, path)
 
     try:
-        with LushaProspectingClient() as client:
+        with LushaProspectingClient(timeout=timeout) as client:
             response = client.reveal_contacts([contact_id], field)
 
         if not isinstance(response, dict):
