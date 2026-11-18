@@ -12,7 +12,7 @@ ENRICH_ENDPOINT = f"{BASE_URL}/contacts/enrich"
 
 class LushaProspectingClient:
 
-    def __init__(self, timeout=self.timeout):
+    def __init__(self, timeout=45):
         self.api_key = LUSHA_API_KEY
 
         if not self.api_key:
@@ -34,7 +34,7 @@ class LushaProspectingClient:
         response = self.session.post(
             endpoint,
             json=payload,
-            timeout=45
+            timeout=self.timeout
         )
 
         if response.status_code == 401:
