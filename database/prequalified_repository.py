@@ -99,16 +99,30 @@ def import_prequalified_brands(dataframe, brand_column, website_column, visitors
     }
 
 
-def get_prequalified_companies():
+def get_prequalified_companies(import_batch=None):
     with get_db() as connection:
-        rows = connection.execute(
-            """
-            SELECT c.*, MAX(p.monthly_visitors) AS prequalified_monthly_visitors,
-                   MAX(p.created_at) AS prequalified_imported_at
-            FROM prequalified_upload_records p
-            JOIN companies c ON c.id = p.company_id
-            GROUP BY c.id
-            ORDER BY MAX(p.created_at) DESC, c.company_name
-            """
-        ).fetchall()
+        if import_batch:
+            rows = connection.execute(
+                """
+                SELECT c.*, MAX(p.monthly_visitors) AS prequalified_monthly_visitors,
+                       MAX(p.created_at) AS prequalified_imported_at
+                FROM prequalified_upload_records p
+                JOIN companies c ON c.id = p.company_id
+                WHERE p.import_batch = ?
+                GROUP BY c.id
+                ORDER BY MAX(p.created_at) DESC, c.company_name
+                """,
+                (import_batch,),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                """
+                SELECT c.*, MAX(p.monthly_visitors) AS prequalified_monthly_visitors,
+                       MAX(p.created_at) AS prequalified_imported_at
+                FROM prequalified_upload_records p
+                JOIN companies c ON c.id = p.company_id
+                GROUP BY c.id
+                ORDER BY MAX(p.created_at) DESC, c.company_name
+                """
+            ).fetchall()
     return [dict(row) for row in rows]
