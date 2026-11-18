@@ -641,7 +641,9 @@ elif page == "Pre-Qualified Leads":
                 pq_visitors_detected = detect_column(
                     pq_columns,
                     ["Monthly Visitors", "Monthly Visits", "Monthly Traffic",
-                     "Monthly Website Visitors", "Visitors", "Monthly Unique Visitors"],
+                     "Monthly Website Visitors", "Visitors", "Monthly Unique Visitors",
+                     "Monthly Visitor Estimates", "Monthly Visitors Estimates",
+                     "Visitor Estimates", "Estimated Monthly Visitors"],
                 )
 
                 st.subheader("2. Confirm dataset columns")
