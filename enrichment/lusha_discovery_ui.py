@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from enrichment.lusha_prospecting import LushaProspectingClient
+from config.settings import LUSHA_API_KEY
 from database.contact_repository import add_contact
 
 
