@@ -608,7 +608,7 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
                 final = {
                     "brand": brand_name, "contact": last_candidate["contact_name"],
                     "designation": last_candidate["designation"], "email": "",
-                    "LinkedIn": last_candidate.get("linkedin_url", ""),
+                    "phone": str(last_candidate.get("revealed_phones") or ""), "LinkedIn": last_candidate.get("linkedin_url", ""),
                     "status": "All priority categories exhausted; no email found",
                 }
             if final is None:
@@ -645,7 +645,7 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
             for column in ("company_name", "contact_name", "designation", "revealed_emails", "revealed_phones", "linkedin_url"):
                 if column not in dataset_contacts.columns:
                     dataset_contacts[column] = ""
-            st.write("**Contacts and emails saved for this dataset**")
+            st.write("**Contacts, emails and phones saved for this dataset**")
             st.dataframe(
                 dataset_contacts[["company_name", "contact_name", "designation", "revealed_emails", "revealed_phones", "linkedin_url"]],
                 use_container_width=True,
