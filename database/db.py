@@ -406,6 +406,25 @@ def initialize_database():
         """)
 
         connection.execute("""
+            CREATE TABLE IF NOT EXISTS prequalified_upload_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id INTEGER NOT NULL,
+                company_name TEXT NOT NULL,
+                website TEXT,
+                monthly_visitors REAL NOT NULL,
+                source_row_number INTEGER,
+                original_row_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(company_id) REFERENCES companies(id) ON DELETE CASCADE
+            )
+        """)
+
+        connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_prequalified_company
+            ON prequalified_upload_records(company_id)
+        """)
+
+        connection.execute("""
             CREATE TABLE IF NOT EXISTS contact_reveal_ledger (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 brand_key TEXT NOT NULL,
