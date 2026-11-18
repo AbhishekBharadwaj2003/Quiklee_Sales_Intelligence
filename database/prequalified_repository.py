@@ -22,7 +22,7 @@ def _find_company(name, website):
     return None
 
 
-def import_prequalified_brands(dataframe, brand_column, website_column, visitors_column):
+def import_prequalified_brands(dataframe, brand_column, website_column, visitors_column, import_batch=''):
     """Insert/reuse companies and persist pre-qualified upload rows; no API calls."""
     if dataframe is None or dataframe.empty:
         raise ValueError("The uploaded dataset is empty.")
@@ -79,12 +79,13 @@ def import_prequalified_brands(dataframe, brand_column, website_column, visitors
             connection.execute(
                 """
                 INSERT INTO prequalified_upload_records
-                    (company_id, company_name, website, monthly_visitors, source_row_number, original_row_json)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (company_id, company_name, website, monthly_visitors, source_row_number, original_row_json, import_batch)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     company_id, name, website, visits, row_number,
                     json.dumps(row.to_dict(), ensure_ascii=False, default=str),
+                    import_batch,
                 ),
             )
 
