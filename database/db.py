@@ -290,6 +290,29 @@ def _migrate_existing_sqlite_data():
         source.close()
 
 
+def ensure_prequalified_table():
+    """Ensure the pre-qualified upload table exists in the active database."""
+    with get_db() as connection:
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS prequalified_upload_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id INTEGER NOT NULL,
+                company_name TEXT NOT NULL,
+                website TEXT,
+                monthly_visitors REAL NOT NULL,
+                source_row_number INTEGER,
+                original_row_json TEXT,
+                import_batch TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(company_id) REFERENCES companies(id) ON DELETE CASCADE
+            )
+        """)
+        connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_prequalified_company
+            ON prequalified_upload_records(company_id)
+        """)
+
+
 def initialize_database():
     """Create the application's core tables in PostgreSQL or local SQLite."""
     using_postgres = bool(_get_database_url())
