@@ -453,7 +453,7 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
             if not contact_id or previous_status:
                 return ""
             try:
-                values, _credits = _reveal_one(output_path, contact_id, field)
+                values, _credits = _reveal_one(output_path, contact_id, field, timeout=20)
                 return "; ".join(values or [])
             except Exception:
                 return ""
@@ -479,7 +479,7 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
         for brand_index, company in enumerate(companies):
             brand = str(company.get("company_name") or "").strip()
             domain = _normalise_domain(company.get("website_url"))
-            status_box.text(f"{brand_index + 1}/{len(companies)} — {brand}")
+            status_box.text(f"{brand_index + 1}/{len(companies)} — {brand}: starting priority waterfall")
             email_person = None
             phone_person = None
             tried = set()
@@ -495,6 +495,7 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
             for category, titles in priorities:
                 if email_person and phone_person:
                     break
+                status_box.text(f"{brand_index + 1}/{len(companies)} — {brand}: searching {category}")
                 search_payload = {
                     "pagination": {"page": 0, "size": 10},
                     "filters": {
@@ -504,9 +505,10 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
                     "options": {"includePartialProfiles": True},
                 }
                 try:
-                    with LushaProspectingClient() as client:
+                    with LushaProspectingClient(timeout=20) as client:
                         response = client.prospect_contacts(search_payload)
-                except Exception:
+                except Exception as prospect_error:
+                    status_box.text(f"{brand_index + 1}/{len(companies)} — {brand}: {category} request failed ({type(prospect_error).__name__})")
                     continue
 
                 candidates = [
