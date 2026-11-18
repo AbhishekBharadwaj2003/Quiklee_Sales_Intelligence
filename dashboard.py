@@ -691,8 +691,19 @@ elif page == "Pre-Qualified Leads":
 
     st.divider()
     st.subheader("3. Contact intelligence — skip traffic research")
-    active_pq_batch = st.session_state.get("pq_active_import_batch")
-    pq_companies = get_prequalified_companies(import_batch=active_pq_batch)
+    # Do not display previously imported companies when no dataset is currently uploaded.
+    if prequalified_file is None:
+        st.session_state.pop("pq_active_import_batch", None)
+        st.session_state.pop("pq_company_selector", None)
+        active_pq_batch = None
+        pq_companies = []
+    else:
+        active_pq_batch = st.session_state.get("pq_active_import_batch")
+        pq_companies = (
+            get_prequalified_companies(import_batch=active_pq_batch)
+            if active_pq_batch
+            else []
+        )
     if not pq_companies:
         st.info("Upload your previously researched dataset to see pre-qualified brands here.")
     else:
