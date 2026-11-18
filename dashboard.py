@@ -270,6 +270,7 @@ page = st.sidebar.radio(
     [
         "Lead Prioritisation",
         "Contact Intelligence",
+        "Pre-Qualified Leads",
         "Website Intelligence",
         "Campaign Management",
         "Reports",
@@ -556,6 +557,218 @@ elif page == "Contact Intelligence":
                 st.info("No contact records saved yet.")
         else:
             st.info("No contact records saved yet. Lusha prospecting access may need to be enabled for your API account.")
+
+
+# --------------------------------------------------
+# PAGE 5: PRE-QUALIFIED LEADS (NO TABAPI)
+# --------------------------------------------------
+
+elif page == "Pre-Qualified Leads":
+
+    from database.prequalified_repository import (
+        import_prequalified_brands,
+        get_prequalified_companies,
+    )
+    from qualification.qualification_pipeline import qualify_company
+
+    st.title("PRE-QUALIFIED LEADS")
+    st.caption(
+        "Import brands whose monthly traffic has already been researched. "
+        "This workflow skips TabAPI entirely and proceeds directly to Lusha."
+    )
+    st.success(
+        "TabAPI is not called in this workflow. Uploaded visitor figures are "
+        "stored as previously researched, manually supplied values."
+    )
+    st.divider()
+
+    st.subheader("1. Upload your pre-qualified brand dataset")
+    prequalified_file = st.file_uploader(
+        "Upload CSV or Excel file",
+        type=["csv", "xlsx", "xls"],
+        key="prequalified_file_uploader",
+    )
+
+    if prequalified_file is not None:
+        try:
+            prequalified_df, _ = read_uploaded_dataset(prequalified_file)
+            if prequalified_df.empty:
+                st.warning("The uploaded dataset contains no rows.")
+            else:
+                st.success(
+                    f"Loaded {len(prequalified_df)} rows and "
+                    f"{len(prequalified_df.columns)} columns."
+                )
+                display_table(prequalified_df.head(10), 280)
+                pq_columns = list(prequalified_df.columns)
+                pq_brand_detected = detect_column(
+                    pq_columns,
+                    ["Brand Name", "Brand", "Company Name", "Company", "Business Name"],
+                )
+                pq_website_detected = detect_column(
+                    pq_columns,
+                    ["Website", "Website URL", "Domain", "Company Website", "URL"],
+                )
+                pq_visitors_detected = detect_column(
+                    pq_columns,
+                    ["Monthly Visitors", "Monthly Visits", "Monthly Traffic",
+                     "Monthly Website Visitors", "Visitors", "Monthly Unique Visitors"],
+                )
+
+                st.subheader("2. Confirm dataset columns")
+                pq_brand_column = st.selectbox(
+                    "Brand / company name",
+                    pq_columns,
+                    index=pq_columns.index(pq_brand_detected) if pq_brand_detected in pq_columns else 0,
+                    key="pq_brand_column",
+                )
+                pq_website_options = ["Not available"] + pq_columns
+                pq_website_default = pq_website_detected if pq_website_detected in pq_columns else "Not available"
+                pq_website_column = st.selectbox(
+                    "Website",
+                    pq_website_options,
+                    index=pq_website_options.index(pq_website_default),
+                    key="pq_website_column",
+                )
+                pq_visitor_default = pq_visitors_detected if pq_visitors_detected in pq_columns else None
+                if pq_visitor_default is None:
+                    st.error("A monthly visitors column is required for this workflow.")
+                pq_visitor_column = st.selectbox(
+                    "Monthly visitors (previously researched)",
+                    pq_columns,
+                    index=pq_columns.index(pq_visitor_default) if pq_visitor_default in pq_columns else 0,
+                    key="pq_visitor_column",
+                )
+
+                st.caption(
+                    "Only companies with more than 100,000 monthly visitors are imported. "
+                    "Rows at or below 100,000 are excluded. No traffic lookup is performed."
+                )
+                pq_batch_name = st.text_input(
+                    "Import batch name",
+                    value=Path(prequalified_file.name).stem,
+                    key="pq_batch_name",
+                )
+                pq_approved = st.checkbox(
+                    "I confirm these visitor figures were researched previously and approve importing the pre-qualified brands.",
+                    key="pq_import_approval",
+                )
+                if st.button(
+                    "Import pre-qualified brands",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=not pq_approved or not pq_batch_name.strip(),
+                    key="pq_import_button",
+                ):
+                    try:
+                        import_result = import_prequalified_brands(
+                            prequalified_df,
+                            pq_brand_column,
+                            None if pq_website_column == "Not available" else pq_website_column,
+                            pq_visitor_column,
+                            pq_batch_name,
+                        )
+                        st.success("Pre-qualified dataset imported. No TabAPI requests were made.")
+                        a, b, c, d = st.columns(4)
+                        a.metric("New companies", import_result["imported_companies"])
+                        b.metric("Existing companies reused", import_result["reused_companies"])
+                        c.metric("Saved records", import_result["saved_records"])
+                        d.metric("Excluded ≤100K", import_result["excluded_below_threshold"])
+                        if import_result["errors"]:
+                            with st.expander("Import notes and excluded rows"):
+                                for note in import_result["errors"]:
+                                    st.write("• " + note)
+                        st.cache_data.clear()
+                    except Exception as error:
+                        st.error(f"Import failed: {type(error).__name__}: {error}")
+
+    st.divider()
+    st.subheader("3. Contact intelligence — skip traffic research")
+    pq_companies = get_prequalified_companies()
+    if not pq_companies:
+        st.info("Upload your previously researched dataset to see pre-qualified brands here.")
+    else:
+        pq_company = st.selectbox(
+            "Select a pre-qualified brand",
+            pq_companies,
+            format_func=lambda item: (
+                item["company_name"] + " — "
+                + f"{float(item['prequalified_monthly_visitors']):,.0f} monthly visitors"
+            ),
+            key="pq_company_selector",
+        )
+        st.metric(
+            "Previously researched monthly visitors",
+            f"{float(pq_company['prequalified_monthly_visitors']):,.0f}",
+        )
+        if pq_company.get("qualification_score") is not None:
+            st.metric("Lead score", f"{float(pq_company['qualification_score']):.2f}")
+        else:
+            st.info("No lead score is saved for this brand. Scoring is optional.")
+
+        render_lusha_discovery_ui(
+            FILES["lusha"],
+            pq_company["id"],
+            pq_company["company_name"],
+            pq_company.get("website_url"),
+        )
+        st.divider()
+        st.subheader("Saved contacts and approved reveals")
+        if FILES["lusha"].exists():
+            pq_contacts = pd.read_csv(FILES["lusha"], dtype=str).fillna("")
+            if not pq_contacts.empty:
+                pq_mask = pd.Series(False, index=pq_contacts.index)
+                if "company_id" in pq_contacts.columns:
+                    pq_mask |= pq_contacts["company_id"].astype(str).str.strip() == str(pq_company["id"])
+                if "company_name" in pq_contacts.columns:
+                    pq_mask |= pq_contacts["company_name"].astype(str).str.strip().str.casefold() == pq_company["company_name"].strip().casefold()
+                pq_domain = str(pq_company.get("website_url") or "").lower().replace("https://", "").replace("http://", "").split("/")[0].removeprefix("www.")
+                if pq_domain and "company_domain" in pq_contacts.columns:
+                    pq_saved_domains = pq_contacts["company_domain"].astype(str).str.lower().str.replace("https://", "", regex=False).str.replace("http://", "", regex=False).str.split("/").str[0].str.removeprefix("www.")
+                    pq_mask |= pq_saved_domains == pq_domain
+                pq_contacts = pq_contacts[pq_mask].copy()
+                if not pq_contacts.empty:
+                    pq_display_cols = [col for col in [
+                        "contact_name", "designation", "company_name",
+                        "revealed_emails", "revealed_phones", "linkedin_url",
+                        "lusha_contact_id", "email_reveal_status",
+                        "phone_reveal_status", "enrichment_status",
+                    ] if col in pq_contacts.columns]
+                    display_table(pq_contacts[pq_display_cols], 320)
+                    render_lusha_reveal_ui(
+                        FILES["lusha"],
+                        company_id=pq_company["id"],
+                        company_domain=pq_company.get("website_url"),
+                        company_name=pq_company["company_name"],
+                    )
+                else:
+                    st.info("No contacts discovered for this brand yet.")
+            else:
+                st.info("No Lusha contacts saved yet.")
+        else:
+            st.info("No Lusha contacts saved yet.")
+
+        with st.expander("Optional: generate lead score"):
+            st.caption(
+                "This uses existing saved company research and the current scoring model. "
+                "It does not call TabAPI. Missing research factors remain missing."
+            )
+            if st.button(
+                "Generate lead score",
+                key=f"pq_score_{pq_company['id']}",
+                use_container_width=True,
+            ):
+                try:
+                    score_result = qualify_company(pq_company["id"])
+                    st.success(
+                        f"Lead score generated: {score_result['lead_score']:.2f} "
+                        f"({score_result['qualification_category']})."
+                    )
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as error:
+                    st.error(f"Could not generate score: {type(error).__name__}: {error}")
+
 
 # --------------------------------------------------
 # PAGE 5: WEBSITE INTELLIGENCE
