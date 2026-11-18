@@ -7,6 +7,7 @@ import json
 from database.db import get_db
 from database.company_repository import get_company_by_domain, get_all_companies, add_company, update_company
 from database.campaign_repository import normalize_brand_key, normalize_domain, parse_visitor_count
+from discovery.deduplication import normalize_company_name
 
 
 def _find_company(name, website):
@@ -17,12 +18,7 @@ def _find_company(name, website):
             return found
     key = normalize_brand_key(name)
     for company in get_all_companies():
-        if normalize_brand_key(company.get("company_name")) == key:
-            return company
-    return None
-
-
-def import_prequalified_brands(dataframe, brand_column, website_column, visitors_column, import_batch=''):
+        if normalize_brand_key(company.get("company_nadef import_prequalified_brands(dataframe, brand_column, website_column, visitors_column, import_batch=''):
     """Insert/reuse companies and persist pre-qualified upload rows; no API calls."""
     if dataframe is None or dataframe.empty:
         raise ValueError("The uploaded dataset is empty.")
@@ -33,9 +29,25 @@ def import_prequalified_brands(dataframe, brand_column, website_column, visitors
 
     imported, reused, skipped, below_threshold = 0, 0, 0, 0
     errors = []
+    pending_records = []
+
+    # Fetch existing companies once. Previously, each row could trigger repeated
+    # full-company scans during matching and insertion.
+    existing_companies = get_all_companies()
+    companies_by_domain = {}
+    companies_by_name = {}
+    for existing in existing_companies:
+        domain_key = normalize_domain(existing.get("website_url") or existing.get("domain") or "")
+        name_key = normalize_company_name(existing.get("company_name") or "")
+        if domain_key:
+            companies_by_domain[domain_key] = existing
+        if name_key:
+            companies_by_name[name_key] = existing
+
     for row_number, (_, row) in enumerate(dataframe.iterrows(), start=1):
         name = str(row.get(brand_column) or "").strip()
         website = str(row.get(website_column) or "").strip() if website_column else ""
+        domain = normalize_domain(website) if website else ""
         visits = parse_visitor_count(row.get(visitors_column))
         if not name:
             skipped += 1
@@ -49,44 +61,70 @@ def import_prequalified_brands(dataframe, brand_column, website_column, visitors
             errors.append(f"Row {row_number} ({name}): {visits:,.0f} visitors is not above 100,000; excluded.")
             continue
 
-        company = _find_company(name, website)
+        name_key = normalize_company_name(name)
+        company = companies_by_domain.get(domain) if domain else None
+        if not company and name_key:
+            company = companies_by_name.get(name_key)
+
         if company:
             company_id = company["id"]
-            updates = {}
+            updates = {"validation_status": "prequalified_manual"}
             if website and not company.get("website_url"):
                 updates["website_url"] = website
-            # Mark as qualified based on the user's prior manual research.
-            # This remains an imported/manual status, not a TabAPI result.
-            updates["validation_status"] = "prequalified_manual"
-            if updates:
-                update_company(company_id, updates)
+            update_company(company_id, updates)
             reused += 1
+            # Keep in-memory maps current for duplicates later in this same upload.
+            if domain:
+                companies_by_domain[domain] = company
+            if name_key:
+                companies_by_name[name_key] = company
         else:
-            result = add_company({
-                "company_name": name,
-                "website_url": website,
-                "validation_status": "prequalified_manual",
-            })
-            company_id = result.get("company_id")
+            # Insert directly instead of calling add_company(), which scans the
+            # companies table for every new row. This preserves the same fields
+            # and manual qualification status.
+            with get_db() as connection:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO companies (company_name, website_url, domain, validation_status)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (name, website, domain or None, "prequalified_manual"),
+                )
+                company_id = cursor.lastrowid
             if not company_id:
                 errors.append(f"Row {row_number} ({name}): could not create company record.")
                 skipped += 1
                 continue
-            update_company(company_id, {"validation_status": "prequalified_manual"})
+            company = {
+                "id": company_id,
+                "company_name": name,
+                "website_url": website,
+                "domain": domain or None,
+                "validation_status": "prequalified_manual",
+            }
+            if domain:
+                companies_by_domain[domain] = company
+            if name_key:
+                companies_by_name[name_key] = company
             imported += 1
 
+        pending_records.append((
+            company_id, name, website, visits, row_number,
+            json.dumps(row.to_dict(), ensure_ascii=False, default=str),
+            import_batch,
+        ))
+
+    # Save the upload records in one batch/transaction instead of opening a
+    # database connection and committing separately for every row.
+    if pending_records:
         with get_db() as connection:
-            connection.execute(
+            connection.executemany(
                 """
                 INSERT INTO prequalified_upload_records
                     (company_id, company_name, website, monthly_visitors, source_row_number, original_row_json, import_batch)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    company_id, name, website, visits, row_number,
-                    json.dumps(row.to_dict(), ensure_ascii=False, default=str),
-                    import_batch,
-                ),
+                pending_records,
             )
 
     return {
@@ -95,6 +133,8 @@ def import_prequalified_brands(dataframe, brand_column, website_column, visitors
         "saved_records": imported + reused,
         "skipped_rows": skipped,
         "excluded_below_threshold": below_threshold,
+        "errors": errors,
+    }reshold": below_threshold,
         "errors": errors,
     }
 
