@@ -415,9 +415,9 @@ def render_lusha_discovery_ui(output_path, company_id, company_name, website_url
 
 
 def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
-    """One-click independent email/phone waterfalls, consolidated per brand."""
+    """One-click broad company prospecting, prioritized independent email/phone waterfall."""
     st.subheader("Find contacts + reveal email and phone for every brand")
-    st.caption("Email and phone are searched independently: Operations → Growth → Supply Chain → Marketplace/D2C.")
+    st.caption("One broad Lusha company search per brand; contacts are ranked locally by Operations → Growth → Supply Chain → Marketplace/D2C.")
     st.write(f"Dataset: **{batch_label}** · Brands: **{len(companies)}**")
     approved = st.checkbox(
         "I approve automated Lusha prospecting and email/phone reveal requests for this dataset. Requests may consume credits.",
@@ -430,12 +430,7 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
     )
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    priorities = [
-        ("Operations", ["Operations Head", "Head of Operations", "VP Operations", "Director of Operations"]),
-        ("Growth", ["Growth Head", "Head of Growth", "VP Growth", "Director of Growth"]),
-        ("Supply Chain", ["Supply Chain Head", "Head of Supply Chain", "VP Supply Chain", "Director Supply Chain"]),
-        ("Marketplace / D2C", ["Marketplace Head", "D2C Head", "Head of Marketplace", "Head of D2C"]),
-    ]
+    priorities = ["Operations", "Growth", "Supply Chain", "Marketplace / D2C"]
 
     if run_all:
         from enrichment.lusha_reveal_ui import _reveal_one
@@ -443,144 +438,139 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
         status_box = st.empty()
         results = []
         complete = 0
+        errors = 0
 
-        def attempt_reveal(candidate, field):
-            contact_id = str(candidate.get("lusha_contact_id") or "").strip()
-            existing_value = str(candidate.get(f"revealed_{field}") or "").strip()
-            previous_status = str(candidate.get(f"{field}_reveal_status") or "").strip()
-            if existing_value:
-                return existing_value
-            if not contact_id or previous_status:
-                return ""
+        def attempt_reveal(person, field):
+            contact_id = str(person.get("lusha_contact_id") or "").strip()
+            prior = str(person.get(f"revealed_{field}") or "").strip()
+            prior_status = str(person.get(f"{field}_reveal_status") or "").strip()
+            if prior:
+                return prior, "Already available"
+            if not contact_id:
+                return "", "No Lusha contact ID"
+            if prior_status:
+                return "", f"Previously attempted: {prior_status}"
             try:
                 values, _credits = _reveal_one(output_path, contact_id, field, timeout=20)
-                return "; ".join(values or [])
-            except Exception:
-                return ""
+                value = "; ".join(values or [])
+                return value, "Revealed" if value else "No value returned"
+            except Exception as ex:
+                return "", f"Reveal error: {type(ex).__name__}"
 
-        def save_candidate(candidate):
+        def persist(person):
             current = pd.read_csv(output_path, dtype=str).fillna("") if output_path.exists() else pd.DataFrame()
             if not current.empty:
                 current = current.astype(object)
-                ids = current.apply(lambda row: _contact_identity(row.to_dict()), axis=1)
-                indexes = current.index[ids == _contact_identity(candidate)].tolist()
+                identities = current.apply(lambda row: _contact_identity(row.to_dict()), axis=1)
+                indexes = current.index[identities == _contact_identity(person)].tolist()
             else:
                 indexes = []
             if indexes:
                 idx = indexes[-1]
-                for key, val in candidate.items():
+                for key, val in person.items():
                     if key not in current.columns:
                         current[key] = ""
-                    current.at[idx, key] = val
+                for key, val in person.items():
+                    current.at[idx, key] = str(val or "")
             else:
-                current = pd.concat([current, pd.DataFrame([candidate])], ignore_index=True, sort=False)
+                current = pd.concat([current, pd.DataFrame([person])], ignore_index=True, sort=False)
             current.to_csv(output_path, index=False, encoding="utf-8-sig")
 
-        for brand_index, company in enumerate(companies):
+        for idx, company in enumerate(companies):
             brand = str(company.get("company_name") or "").strip()
             domain = _normalise_domain(company.get("website_url"))
-            status_box.text(f"{brand_index + 1}/{len(companies)} — {brand}: starting priority waterfall")
-            email_person = None
-            phone_person = None
-            tried = set()
+            status_box.text(f"{idx+1}/{len(companies)} — {brand}: searching company contacts")
+            email_person, phone_person = None, None
+            email_value, phone_value = "", ""
+            email_error, phone_error = "", ""
             if not domain:
-                results.append({
-                    "BRAND": brand, "Contact Person 1": "", "DESIGNATION 1": "", "EMAIL": "",
-                    "CONTACT PERSON 2": "", "DESIGNATION 2": "", "PHONE NUMBER": "",
-                    "LinkedIn 1": "", "LinkedIn 2": "", "Status": "Missing website/domain",
-                })
-                progress.progress((brand_index + 1) / len(companies))
+                results.append({"BRAND":brand,"Contact Person 1":"","DESIGNATION 1":"","EMAIL":"","CONTACT PERSON 2":"","DESIGNATION 2":"","PHONE NUMBER":"","LinkedIn 1":"","LinkedIn 2":"","Status":"Missing website/domain"})
+                progress.progress((idx+1)/len(companies))
                 continue
 
-            for category, titles in priorities:
-                if email_person and phone_person:
-                    break
-                status_box.text(f"{brand_index + 1}/{len(companies)} — {brand}: searching {category}")
-                search_payload = {
-                    "pagination": {"page": 0, "size": 10},
-                    "filters": {
-                        "companies": {"include": {"domains": [domain]}},
-                        "contacts": {"include": {"jobTitles": titles}},
-                    },
-                    "options": {"includePartialProfiles": True},
-                }
-                try:
-                    with LushaProspectingClient(timeout=20) as client:
-                        response = client.prospect_contacts(search_payload)
-                except Exception as prospect_error:
-                    status_box.text(f"{brand_index + 1}/{len(companies)} — {brand}: {category} request failed ({type(prospect_error).__name__})")
-                    continue
+            payload = {
+                "pagination": {"page": 0, "size": 50},
+                "filters": {"companies": {"include": {"domains": [domain]}}},
+                "options": {"includePartialProfiles": True},
+            }
+            raw_response = None
+            try:
+                with LushaProspectingClient(timeout=20) as client:
+                    raw_response = client.prospect_contacts(payload)
+                raw_path = _save_raw_response(output_path, payload, raw_response, company.get("id"), brand, domain)
+            except Exception as ex:
+                errors += 1
+                results.append({"BRAND":brand,"Contact Person 1":"","DESIGNATION 1":"","EMAIL":"","CONTACT PERSON 2":"","DESIGNATION 2":"","PHONE NUMBER":"","LinkedIn 1":"","LinkedIn 2":"","Status":f"Prospecting error: {type(ex).__name__}"})
+                progress.progress((idx+1)/len(companies))
+                continue
 
-                candidates = [
-                    _normalise_contact(item, brand, domain)
-                    for item in _extract_contacts(response)
-                ]
-                ranked = [
-                    item for item in _rank_contacts([x for x in candidates if x])
-                    if item.get("role_category") == category
-                ]
-                for person in ranked:
-                    ident = _contact_identity(person)
-                    if ident in tried:
+            raw_contacts = _extract_contacts(raw_response)
+            candidates = [_normalise_contact(item, brand, domain) for item in raw_contacts]
+            candidates = [item for item in candidates if item]
+            ranked = _rank_contacts(candidates)
+            by_priority = {role: [person for person in ranked if person.get("role_category") == role] for role in priorities}
+
+            # Keep all unique returned candidates in the file/database for audit; then
+            # reveal only until each independent field (email and phone) is populated.
+            for person in ranked:
+                person["company_id"] = str(company.get("id", ""))
+                person["bulk_selection_priority"] = person.get("role_category", "")
+                person["bulk_dataset"] = batch_label
+                persist(person)
+
+            tried = set()
+            for category in priorities:
+                if email_value and phone_value:
+                    break
+                status_box.text(f"{idx+1}/{len(companies)} — {brand}: trying {category}")
+                for person in by_priority.get(category, []):
+                    identity = _contact_identity(person)
+                    if identity in tried:
                         continue
-                    tried.add(ident)
-                    person.update({
-                        "company_id": str(company.get("id", "")),
-                        "bulk_selection_priority": category,
-                        "bulk_dataset": batch_label,
-                    })
+                    tried.add(identity)
                     if not person.get("lusha_contact_id"):
                         continue
-                    # Persist this contact first: reveal safety tracking requires
-                    # exactly one CSV row with this Lusha contact ID.
-                    save_candidate(person)
-                    try:
-                        add_contact(company.get("id"), {
-                            "contact_name": person.get("contact_name", ""),
-                            "designation": person.get("designation", ""),
-                            "linkedin_url": person.get("linkedin_url", ""),
-                            "contact_source": "Lusha Bulk Independent Email/Phone Waterfall",
-                            "enrichment_status": "prospected",
-                        })
-                    except Exception:
-                        pass
-                    # Fill email and phone independently; either can be sourced
-                    # from a different contact and designation.
-                    if not email_person:
-                        email = attempt_reveal(person, "emails")
-                        if email:
-                            person["revealed_emails"] = email
+                    if not email_value:
+                        email_value, email_error = attempt_reveal(person, "emails")
+                        if email_value:
                             email_person = dict(person)
-                    if not phone_person:
-                        phone = attempt_reveal(person, "phones")
-                        if phone:
-                            person["revealed_phones"] = phone
+                            email_person["revealed_emails"] = email_value
+                            persist(email_person)
+                    if not phone_value:
+                        phone_value, phone_error = attempt_reveal(person, "phones")
+                        if phone_value:
                             phone_person = dict(person)
-                    save_candidate(person)
-                    if email_person and phone_person:
+                            phone_person["revealed_phones"] = phone_value
+                            persist(phone_person)
+                    if email_value and phone_value:
                         break
 
             row = {
                 "BRAND": brand,
                 "Contact Person 1": (email_person or {}).get("contact_name", ""),
                 "DESIGNATION 1": (email_person or {}).get("designation", ""),
-                "EMAIL": (email_person or {}).get("revealed_emails", ""),
+                "EMAIL": email_value,
                 "CONTACT PERSON 2": (phone_person or {}).get("contact_name", ""),
                 "DESIGNATION 2": (phone_person or {}).get("designation", ""),
-                "PHONE NUMBER": (phone_person or {}).get("revealed_phones", ""),
+                "PHONE NUMBER": phone_value,
                 "LinkedIn 1": (email_person or {}).get("linkedin_url", ""),
                 "LinkedIn 2": (phone_person or {}).get("linkedin_url", ""),
-                "Status": ("Email and phone found" if email_person and phone_person else
-                           "Partial contact data" if email_person or phone_person else "Email and phone not found"),
+                "Status": ("Email and phone found" if email_value and phone_value else
+                    "Email found; phone unavailable" if email_value else
+                    "Phone found; email unavailable" if phone_value else
+                    f"No matching contacts in response ({len(candidates)} returned)" if candidates else
+                    "No contacts parsed from API response"),
             }
-            if email_person and phone_person:
+            if email_value and phone_value:
                 complete += 1
+            if not email_value or not phone_value:
+                errors += 1
             results.append(row)
-            progress.progress((brand_index + 1) / len(companies))
+            progress.progress((idx+1)/len(companies))
 
         status_box.empty()
         progress.empty()
-        st.success(f"Completed all {len(companies)} brands. {complete} brands have both email and phone.")
+        st.success(f"Run finished: {len(companies)} brands processed. {complete} brands returned both email and phone. {errors} brands incomplete or errored.")
         if results:
             st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
 
@@ -594,4 +584,4 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
                         batch_df[column] = ""
                 st.write("**Saved contact records for this dataset**")
                 st.dataframe(batch_df[["company_name", "contact_name", "designation", "revealed_emails", "revealed_phones", "linkedin_url"]], use_container_width=True, hide_index=True)
-    st.caption("Email and phone are independently sourced; they may belong to different people.")
+    st.caption("Email and phone are independently sourced and may belong to different people.")
