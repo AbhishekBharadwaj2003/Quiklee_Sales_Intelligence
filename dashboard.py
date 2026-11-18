@@ -21,7 +21,7 @@ from database.campaign_research_controller import (
 )
 from database.campaign_linker import link_campaign_companies
 from enrichment.lusha_reveal_ui import render_lusha_reveal_ui
-from enrichment.lusha_discovery_ui import render_lusha_discovery_ui
+from enrichment.lusha_discovery_ui import render_lusha_discovery_ui, render_lusha_bulk_discovery_ui
 from campaign_workflow import get_campaign_traffic_candidates, run_all_pending_traffic_validation, score_campaign_leads, get_campaign_intelligence, build_campaign_report, reset_campaign_traffic_to_pending
 
 from database.campaign_repository import (
@@ -741,6 +741,13 @@ elif page == "Pre-Qualified Leads":
     if not pq_companies:
         st.info("Upload your previously researched dataset to see pre-qualified brands here.")
     else:
+        render_lusha_bulk_discovery_ui(
+            FILES["lusha"],
+            pq_companies,
+            active_pq_batch or "Saved pre-qualified dataset",
+        )
+        st.divider()
+        st.subheader("Individual brand contact discovery (existing workflow)")
         pq_company = st.selectbox(
             "Select a pre-qualified brand",
             pq_companies,
