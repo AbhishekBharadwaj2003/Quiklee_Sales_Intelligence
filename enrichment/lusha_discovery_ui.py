@@ -574,7 +574,7 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
 
                 if emails:
                     final = {
-                        "brand": brand_name, "contact": candidate["contact_name",
+                        "brand": brand_name, "contact": candidate["contact_name"],
                         "designation": candidate["designation"], "email": "; ".join(emails),
                         "LinkedIn": candidate.get("linkedin_url", ""),
                         "status": f"Email found — {category} ({credits} credits)",
