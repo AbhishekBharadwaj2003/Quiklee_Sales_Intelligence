@@ -12,7 +12,7 @@ ENRICH_ENDPOINT = f"{BASE_URL}/contacts/enrich"
 
 class LushaProspectingClient:
 
-    def __init__(self):
+    def __init__(self, timeout=self.timeout):
         self.api_key = LUSHA_API_KEY
 
         if not self.api_key:
@@ -21,6 +21,7 @@ class LushaProspectingClient:
         if self.api_key.startswith("your_"):
             raise ValueError("Replace the placeholder LUSHA_API_KEY in .env")
 
+        self.timeout = int(timeout)
         self.session = requests.Session()
 
         self.session.headers.update({
