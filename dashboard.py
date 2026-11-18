@@ -723,7 +723,8 @@ elif page == "Pre-Qualified Leads":
     st.subheader("3. Contact intelligence — skip traffic research")
     # Load contact intelligence from saved batches, independent of the uploader widget.
     # Streamlit reruns can clear the uploader value after import; the database is the source of truth.
-    saved_batch_names = [item["import_batch"] for item in get_prequalified_import_batches()]
+    saved_pq_batches_for_contact = get_prequalified_import_batches()
+    saved_batch_names = [item["import_batch"] for item in saved_pq_batches_for_contact]
     active_pq_batch = st.session_state.get("pq_active_import_batch")
     if active_pq_batch not in saved_batch_names:
         active_pq_batch = saved_batch_names[0] if saved_batch_names else None
@@ -731,6 +732,23 @@ elif page == "Pre-Qualified Leads":
             st.session_state["pq_active_import_batch"] = active_pq_batch
         else:
             st.session_state.pop("pq_active_import_batch", None)
+            st.session_state.pop("pq_company_selector", None)
+
+    if saved_pq_batches_for_contact:
+        batch_display = {
+            item["import_batch"]: f'{item["import_batch"]} — {item["brand_count"]} brands'
+            for item in saved_pq_batches_for_contact
+        }
+        selected_contact_batch = st.selectbox(
+            "Select saved dataset for contact discovery",
+            saved_batch_names,
+            index=saved_batch_names.index(active_pq_batch) if active_pq_batch in saved_batch_names else 0,
+            format_func=lambda batch: batch_display.get(batch, batch),
+            key="pq_contact_dataset_selector",
+        )
+        if selected_contact_batch != active_pq_batch:
+            active_pq_batch = selected_contact_batch
+            st.session_state["pq_active_import_batch"] = active_pq_batch
             st.session_state.pop("pq_company_selector", None)
 
     pq_companies = (
