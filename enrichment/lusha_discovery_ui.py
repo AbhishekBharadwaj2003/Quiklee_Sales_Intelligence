@@ -529,6 +529,19 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
                     })
                     if not person.get("lusha_contact_id"):
                         continue
+                    # Persist this contact first: reveal safety tracking requires
+                    # exactly one CSV row with this Lusha contact ID.
+                    save_candidate(person)
+                    try:
+                        add_contact(company.get("id"), {
+                            "contact_name": person.get("contact_name", ""),
+                            "designation": person.get("designation", ""),
+                            "linkedin_url": person.get("linkedin_url", ""),
+                            "contact_source": "Lusha Bulk Independent Email/Phone Waterfall",
+                            "enrichment_status": "prospected",
+                        })
+                    except Exception:
+                        pass
                     # Fill email and phone independently; either can be sourced
                     # from a different contact and designation.
                     if not email_person:
