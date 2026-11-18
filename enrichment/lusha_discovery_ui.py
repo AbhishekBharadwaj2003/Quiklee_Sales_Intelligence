@@ -438,6 +438,7 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
         progress = st.progress(0)
         status_box = st.empty()
         results = []
+        diagnostics = []
         complete = 0
         errors = 0
 
@@ -503,8 +504,11 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
                 errors += 1
                 error_detail = str(ex).replace(str(LUSHA_API_KEY), "[REDACTED]")[:300]
                 error_status = f"Prospecting error: {type(ex).__name__}: {error_detail}"
-                results.append({"BRAND":brand,"Contact Person 1":"","DESIGNATION 1":"","EMAIL":"","CONTACT PERSON 2":"","DESIGNATION 2":"","PHONE NUMBER":"","LinkedIn 1":"","LinkedIn 2":"","Status":error_status})
-                status_box.text(f"{idx+1}/{len(companies)} — {brand}: ERROR — {error_status}")
+                diagnostics.append({"Brand": brand, "Error": error_status})
+                results.append({"BRAND":brand,"Contact Person 1":"","DESIGNATION 1":"","EMAIL":"","CONTACT PERSON 2":"","DESIGNATION 2":"","PHONE NUMBER":"","LinkedIn 1":"","LinkedIn 2":"","Status":f"Prospecting error: {type(ex).__name__}"})
+                status_box.text(f"{idx+1}/{len(companies)} — {brand}: ERROR")
+                progress.progress((idx+1)/len(companies))
+                continue")
                 progress.progress((idx+1)/len(companies))
                 continue
 
@@ -579,6 +583,12 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
             st.warning("Open the Status column in the results below. It now includes the actual API error detail (with API key redacted) so we can identify the cause.")
         if results:
             st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+        if diagnostics:
+            with st.expander("View full Lusha API errors", expanded=True):
+                st.dataframe(pd.DataFrame(diagnostics), use_container_width=True, hide_index=True)
+                for diagnostic in diagnostics:
+                    st.write(f"**{diagnostic['Brand"]}**")
+                    st.code(diagnostic["Error"])
 
     if output_path.exists():
         saved = pd.read_csv(output_path, dtype=str).fillna("")
