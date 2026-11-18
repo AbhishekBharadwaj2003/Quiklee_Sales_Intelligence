@@ -7,7 +7,7 @@ import re
 import pandas as pd
 import streamlit as st
 
-from database.db import initialize_database
+from database.db import initialize_database, ensure_prequalified_table
 from database.company_repository import update_company, get_all_companies
 
 from database.campaign_research_queue import (
@@ -57,6 +57,8 @@ def initialize_database_once():
 
 
 initialize_database_once()
+# Ensure the pre-qualified workflow's table exists even on databases initialized earlier.
+ensure_prequalified_table()
 
 FILES = {
     "crm": DATA_DIR / "Quiklee Sales CRM - Leads.csv",
