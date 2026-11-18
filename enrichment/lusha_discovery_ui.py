@@ -607,9 +607,11 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
             if final is None and last_candidate:
                 final = {
                     "brand": brand_name, "contact": last_candidate["contact_name"],
-                    "designation": last_candidate["designation"], "email": "",
-                    "phone": str(last_candidate.get("revealed_phones") or ""), "LinkedIn": last_candidate.get("linkedin_url", ""),
-                    "status": "All priority categories exhausted; no email found",
+                    "designation": last_candidate["designation"],
+                    "email": str(last_candidate.get("revealed_emails") or ""),
+                    "phone": str(last_candidate.get("revealed_phones") or ""),
+                    "LinkedIn": last_candidate.get("linkedin_url", ""),
+                    "status": "No complete email + phone pair found after all priority categories",
                 }
             if final is None:
                 final = {
@@ -624,7 +626,7 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
         status.empty()
         progress.empty()
         st.success(
-            f"Automated waterfall completed. {saved_count} brands returned email addresses; "
+            f"Automated waterfall completed. {saved_count} brands returned complete email + phone contacts; "
             f"{no_email_count} did not."
         )
         if final_rows:
@@ -651,4 +653,4 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
                 use_container_width=True,
                 hide_index=True,
             )
-    st.caption("Phone reveal is attempted for the selected contact after an email is found; phone reveal errors do not trigger another designation search.")
+    st.caption("The workflow accepts a designation only when both email and phone are returned; otherwise it automatically tries the next priority designation.")
