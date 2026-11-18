@@ -57,8 +57,14 @@ def initialize_database_once():
 
 
 initialize_database_once()
-# Ensure the pre-qualified workflow's table exists even on databases initialized earlier.
-ensure_prequalified_table()
+
+# Cache the pre-qualified schema safeguard to avoid opening a database connection
+# and running CREATE TABLE / CREATE INDEX checks on every Streamlit rerun.
+@st.cache_resource(show_spinner=False)
+def ensure_prequalified_schema_once():
+    ensure_prequalified_table()
+
+ensure_prequalified_schema_once()
 
 FILES = {
     "crm": DATA_DIR / "Quiklee Sales CRM - Leads.csv",
