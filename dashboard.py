@@ -570,6 +570,8 @@ elif page == "Pre-Qualified Leads":
     from database.prequalified_repository import (
         import_prequalified_brands,
         get_prequalified_companies,
+        get_prequalified_import_batches,
+        delete_prequalified_import_batch,
     )
     from qualification.qualification_pipeline import qualify_company
 
@@ -584,6 +586,25 @@ elif page == "Pre-Qualified Leads":
     )
     st.divider()
 
+    st.subheader("Saved pre-qualified datasets")
+    saved_pq_batches = get_prequalified_import_batches()
+    if not saved_pq_batches:
+        st.caption("No saved datasets yet.")
+    else:
+        for saved_batch in saved_pq_batches:
+            batch_name = saved_batch["import_batch"]
+            batch_col, delete_col = st.columns([5, 1])
+            batch_col.write(f"**{batch_name}** — {saved_batch['brand_count']} brands")
+            if delete_col.button("🗑️ Delete", key=f"delete_pq_batch_{batch_name}"):
+                deleted_count = delete_prequalified_import_batch(batch_name)
+                if st.session_state.get("pq_active_import_batch") == batch_name:
+                    st.session_state.pop("pq_active_import_batch", None)
+                    st.session_state.pop("pq_company_selector", None)
+                st.cache_data.clear()
+                st.success(f"Deleted dataset '{batch_name}' ({deleted_count} saved rows).")
+                st.rerun()
+
+    st.divider()
     st.subheader("1. Upload your pre-qualified brand dataset")
     prequalified_file = st.file_uploader(
         "Upload CSV or Excel file",
@@ -663,16 +684,17 @@ elif page == "Pre-Qualified Leads":
                     key="pq_import_button",
                 ):
                     try:
+                        unique_pq_batch = f"{pq_batch_name.strip()} — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                         import_result = import_prequalified_brands(
                             prequalified_df,
                             pq_brand_column,
                             None if pq_website_column == "Not available" else pq_website_column,
                             pq_visitor_column,
-                            pq_batch_name,
+                            unique_pq_batch,
                         )
-                        st.success("Pre-qualified dataset imported. No TabAPI requests were made.")
+                        st.success("Pre-qualified dataset saved. No TabAPI requests were made.")
                         # Restrict contact selection to this newly imported dataset.
-                        st.session_state["pq_active_import_batch"] = pq_batch_name.strip()
+                        st.session_state["pq_active_import_batch"] = unique_pq_batch
                         a, b, c, d = st.columns(4)
                         a.metric("New companies", import_result["imported_companies"])
                         b.metric("Existing companies reused", import_result["reused_companies"])
