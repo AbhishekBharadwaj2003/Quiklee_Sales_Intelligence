@@ -508,8 +508,6 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
                 results.append({"BRAND":brand,"Contact Person 1":"","DESIGNATION 1":"","EMAIL":"","CONTACT PERSON 2":"","DESIGNATION 2":"","PHONE NUMBER":"","LinkedIn 1":"","LinkedIn 2":"","Status":f"Prospecting error: {type(ex).__name__}"})
                 status_box.text(f"{idx+1}/{len(companies)} — {brand}: ERROR")
                 progress.progress((idx+1)/len(companies))
-                continue")
-                progress.progress((idx+1)/len(companies))
                 continue
 
             raw_contacts = _extract_contacts(raw_response)
@@ -587,7 +585,7 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
             with st.expander("View full Lusha API errors", expanded=True):
                 st.dataframe(pd.DataFrame(diagnostics), use_container_width=True, hide_index=True)
                 for diagnostic in diagnostics:
-                    st.write(f"**{diagnostic['Brand"]}**")
+                    st.write("**" + str(diagnostic.get("Brand", "")) + "**")
                     st.code(diagnostic["Error"])
 
     if output_path.exists():
