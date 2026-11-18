@@ -293,7 +293,7 @@ def _reserve_brand_field(path, contact_id, field):
     field_type = FIELD_MAP[field]
     now = datetime.now(timezone.utc).isoformat()
 
-    with sqlite3.connect(DB_FILE, timeout=30) as connection:
+    with get_db() as connection:
         connection.execute("BEGIN")
         _ensure_ledger_table(connection)
 
@@ -355,7 +355,7 @@ def _update_ledger(
     revealed_value = "; ".join(values or []) or None
     revealed_at = now if values else None
 
-    with sqlite3.connect(DB_FILE, timeout=30) as connection:
+    with get_db() as connection:
         connection.execute(
             """
             UPDATE contact_reveal_ledger
@@ -391,7 +391,7 @@ def _sync_revealed_value_to_database(contact, field, values):
         return 0
 
     company_id = None
-    with sqlite3.connect(DB_FILE, timeout=30) as connection:
+    with get_db() as connection:
         company_id = _company_id_for_contact(connection, contact)
 
         if company_id is None:
@@ -646,7 +646,7 @@ def render_lusha_reveal_ui(csv_path, company_id=None, company_domain=None, compa
         existing_value = _clean(contact.get(value_column))
         existing_status = _clean(contact.get(status_column))
 
-        with sqlite3.connect(DB_FILE, timeout=30) as connection:
+        with get_db() as connection:
             ledger = connection.execute(
                 """
                 SELECT reveal_status, contact_id, revealed_value
