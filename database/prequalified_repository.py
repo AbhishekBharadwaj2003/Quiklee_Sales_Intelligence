@@ -99,6 +99,34 @@ def import_prequalified_brands(dataframe, brand_column, website_column, visitors
     }
 
 
+def get_prequalified_import_batches():
+    """List saved pre-qualified dataset batches."""
+    with get_db() as connection:
+        rows = connection.execute(
+            """
+            SELECT import_batch, COUNT(DISTINCT company_id) AS brand_count,
+                   MAX(created_at) AS imported_at
+            FROM prequalified_upload_records
+            WHERE COALESCE(import_batch, '') != ''
+            GROUP BY import_batch
+            ORDER BY MAX(created_at) DESC
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def delete_prequalified_import_batch(import_batch):
+    """Delete one saved dataset batch, preserving shared company profiles."""
+    if not import_batch:
+        return 0
+    with get_db() as connection:
+        cursor = connection.execute(
+            "DELETE FROM prequalified_upload_records WHERE import_batch = ?",
+            (import_batch,),
+        )
+        return cursor.rowcount
+
+
 def get_prequalified_companies(import_batch=None):
     with get_db() as connection:
         if import_batch:
