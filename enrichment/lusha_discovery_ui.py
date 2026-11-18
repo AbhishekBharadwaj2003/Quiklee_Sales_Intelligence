@@ -540,51 +540,56 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
                     continue
 
                 prior_email = str(candidate.get("revealed_emails") or "").strip()
-                prior_status = str(candidate.get("emails_reveal_status") or "").strip()
-                if prior_email:
-                    final = {
-                        "brand": brand_name, "contact": candidate["contact_name"],
-                        "designation": candidate["designation"], "email": prior_email,
-                        "LinkedIn": candidate.get("linkedin_url", ""),
-                        "status": f"Email already saved ({category})",
-                    }
-                    break
-                if prior_status:
-                    # Never retry a contact with an uncertain/prior reveal status.
-                    final = {
-                        "brand": brand_name, "contact": candidate["contact_name"],
-                        "designation": candidate["designation"], "email": "",
-                        "LinkedIn": candidate.get("linkedin_url", ""),
-                        "status": f"Skipped due to prior reveal status ({category})",
-                    }
-                    stop_on_error = True
-                    break
+                prior_email_status = str(candidate.get("emails_reveal_status") or "").strip()
+                prior_phone = str(candidate.get("revealed_phones") or "").strip()
+                prior_phone_status = str(candidate.get("phones_reveal_status") or "").strip()
 
-                try:
-                    emails, credits = _reveal_one(output_path, contact_id, "emails")
-                except Exception as reveal_error:
+                if prior_email:
+                    emails = [prior_email]
+                    email_credits = 0
+                elif prior_email_status:
                     final = {
                         "brand": brand_name, "contact": candidate["contact_name"],
                         "designation": candidate["designation"], "email": "",
-                        "LinkedIn": candidate.get("linkedin_url", ""),
-                        "status": f"Reveal uncertain/error ({category}); stopped to avoid duplicate charge",
+                        "phone": prior_phone, "LinkedIn": candidate.get("linkedin_url", ""),
+                        "status": f"Email reveal already attempted/locked ({category}); fallback skipped for safety",
                     }
                     stop_on_error = True
                     break
+                else:
+                    try:
+                        emails, email_credits = _reveal_one(output_path, contact_id, "emails")
+                    except Exception:
+                        final = {
+                            "brand": brand_name, "contact": candidate["contact_name"],
+                            "designation": candidate["designation"], "email": "",
+                            "phone": prior_phone, "LinkedIn": candidate.get("linkedin_url", ""),
+                            "status": f"Email reveal uncertain/error ({category}); stopped to avoid duplicate charge",
+                        }
+                        stop_on_error = True
+                        break
 
                 if emails:
+                    phone_values = [prior_phone] if prior_phone else []
+                    phone_credits = 0
+                    if not phone_values and not prior_phone_status:
+                        try:
+                            phone_values, phone_credits = _reveal_one(output_path, contact_id, "phones")
+                        except Exception:
+                            phone_values = []
                     final = {
                         "brand": brand_name, "contact": candidate["contact_name"],
                         "designation": candidate["designation"], "email": "; ".join(emails),
+                        "phone": "; ".join(phone_values or []),
                         "LinkedIn": candidate.get("linkedin_url", ""),
-                        "status": f"Email found — {category} ({credits} credits)",
+                        "status": f"Email found — {category} (email {email_credits} + phone {phone_credits} credits)",
                     }
                     try:
                         add_contact(company.get("id"), {
                             "contact_name": candidate.get("contact_name", ""),
                             "designation": candidate.get("designation", ""),
                             "linkedin_url": candidate.get("linkedin_url", ""),
-                            "contact_source": "Lusha Bulk Waterfall Prospecting + Reveal",
+                            "contact_source": "Lusha Bulk Waterfall Prospecting + Email/Phone Reveal",
                             "enrichment_status": "revealed",
                         })
                     except Exception:
@@ -592,12 +597,11 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
                     saved_count += 1
                     break
 
-                # Lusha explicitly returned no email for this contact: move on.
                 final = {
                     "brand": brand_name, "contact": candidate["contact_name"],
                     "designation": candidate["designation"], "email": "",
-                    "LinkedIn": candidate.get("linkedin_url", ""),
-                    "status": f"No email — tried {category} ({credits} credits); checking next priority",
+                    "phone": prior_phone, "LinkedIn": candidate.get("linkedin_url", ""),
+                    "status": f"No email — tried {category} ({email_credits} credits); checking next priority",
                 }
 
             if final is None and last_candidate:
