@@ -436,6 +436,10 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     existing_df = pd.read_csv(output_path, dtype=str).fillna("") if output_path.exists() else pd.DataFrame()
+    # Streamlit Cloud may use pandas Arrow-backed string columns; convert to
+    # writable object columns before row-level updates.
+    if not existing_df.empty:
+        existing_df = existing_df.astype(object)
     progress = st.progress(0)
     status = st.empty()
     results = []
