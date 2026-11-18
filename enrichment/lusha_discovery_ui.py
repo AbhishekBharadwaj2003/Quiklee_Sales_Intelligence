@@ -480,21 +480,36 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
 
         if chosen:
             ident = _contact_identity(chosen)
+            is_already_saved = False
             if not existing_df.empty:
                 known = existing_df.apply(lambda row: _contact_identity(row.to_dict()), axis=1)
-                if (known == ident).any():
-                    results.append({"brand": company_name, "contact": chosen["contact_name"], "designation": chosen["designation"], "status": "Already saved"})
+                matching_rows = existing_df.index[known == ident].tolist()
+                if matching_rows:
+                    is_already_saved = True
+                    existing_row_index = matching_rows[-1]
+                    # Attach this discovery to the selected batch while preserving
+                    # any previously revealed contact details on the saved row.
+                    for key, value in chosen.items():
+                        if key not in existing_df.columns:
+                            existing_df[key] = ""
+                        if key in ("revealed_emails", "revealed_phones", "emails_reveal_status", "phones_reveal_status"):
+                            if not str(existing_df.at[existing_row_index, key] or "").strip():
+                                existing_df.at[existing_row_index, key] = value
+                        else:
+                            existing_df.at[existing_row_index, key] = value
                 else:
-                    new_df = pd.DataFrame([chosen])
-                    existing_df = pd.concat([existing_df, new_df], ignore_index=True, sort=False)
-                    existing_df.to_csv(output_path, index=False, encoding="utf-8-sig")
+                    existing_df = pd.concat([existing_df, pd.DataFrame([chosen])], ignore_index=True, sort=False)
                     saved_count += 1
-                    results.append({"brand": company_name, "contact": chosen["contact_name"], "designation": chosen["designation"], "status": "Saved"})
             else:
                 existing_df = pd.DataFrame([chosen])
-                existing_df.to_csv(output_path, index=False, encoding="utf-8-sig")
                 saved_count += 1
-                results.append({"brand": company_name, "contact": chosen["contact_name"], "designation": chosen["designation"], "status": "Saved"})
+            existing_df.to_csv(output_path, index=False, encoding="utf-8-sig")
+            results.append({
+                "brand": company_name,
+                "contact": chosen["contact_name"],
+                "designation": chosen["designation"],
+                "status": "Already saved" if is_already_saved else "Saved",
+            })
             try:
                 add_contact(company["id"], {
                     "contact_name": chosen.get("contact_name", ""),
