@@ -682,6 +682,9 @@ elif page == "Pre-Qualified Leads":
                     except Exception as error:
                         st.error(f"Import failed: {type(error).__name__}: {error}")
 
+        except Exception as error:
+            st.error(f"Could not read or process uploaded file: {type(error).__name__}: {error}")
+
     st.divider()
     st.subheader("3. Contact intelligence — skip traffic research")
     pq_companies = get_prequalified_companies()
