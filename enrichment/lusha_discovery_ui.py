@@ -415,53 +415,59 @@ def render_lusha_discovery_ui(output_path, company_id, company_name, website_url
 
 
 def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
-    """Discover at most one best-priority contact per approved brand."""
-    st.subheader("Bulk Contact Discovery")
-    st.caption("Find one contact per brand using Operations → Growth → Supply Chain → Marketplace/D2C.")
+    """One-click prospecting + email reveal waterfall, one final contact per brand."""
+    st.subheader("Bulk Contact Discovery + Email Reveal")
+    st.caption(
+        "For each brand, search Operations → Growth → Supply Chain → Marketplace/D2C. "
+        "Reveal the candidate's email immediately; if no email is returned, move to the next role."
+    )
     st.write(f"Dataset: **{batch_label}** · Brands: **{len(companies)}**")
     approved = st.checkbox(
-        "I approve Lusha prospecting searches for all brands in this dataset. Searches may consume plan credits.",
+        "I approve automated prospecting and email-reveal requests for this dataset. "
+        "Multiple attempts per brand may consume Lusha credits.",
         key=f"pq_bulk_approve_{batch_label}",
     )
-    run_discovery = st.button(
-        "Discover one contact for every brand",
+    run_all = st.button(
+        "Find contact + reveal email for every brand",
         type="primary",
         disabled=not approved or not companies,
-        key=f"pq_bulk_run_{batch_label}",
+        key=f"pq_bulk_run_all_{batch_label}",
     )
+
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    priority_queries = [
+        ("Operations", ["Operations Head", "Head of Operations", "VP Operations", "Director of Operations"]),
+        ("Growth", ["Growth Head", "Head of Growth", "VP Growth", "Director of Growth"]),
+        ("Supply Chain", ["Supply Chain Head", "Head of Supply Chain", "VP Supply Chain", "Director Supply Chain"]),
+        ("Marketplace / D2C", ["Marketplace Head", "D2C Head", "Head of Marketplace", "Head of D2C"]),
+    ]
 
-    if run_discovery:
-        priority_queries = [
-            ("Operations", ["Operations Head", "Head of Operations", "VP Operations", "Director of Operations"]),
-            ("Growth", ["Growth Head", "Head of Growth", "VP Growth", "Director of Growth"]),
-            ("Supply Chain", ["Supply Chain Head", "Head of Supply Chain", "VP Supply Chain", "Director Supply Chain"]),
-            ("Marketplace / D2C", ["Marketplace Head", "D2C Head", "Head of Marketplace", "Head of D2C"]),
-        ]
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        existing_df = pd.read_csv(output_path, dtype=str).fillna("") if output_path.exists() else pd.DataFrame()
-        # Streamlit Cloud may use pandas Arrow-backed string columns; convert to
-        # writable object columns before row-level updates.
-        if not existing_df.empty:
-            existing_df = existing_df.astype(object)
+    if run_all:
+        from enrichment.lusha_reveal_ui import _reveal_one
+
         progress = st.progress(0)
         status = st.empty()
-        results = []
-        no_match = 0
+        final_rows = []
+        no_email_count = 0
         saved_count = 0
 
-        for idx, company in enumerate(companies):
-            company_name = str(company.get("company_name") or "").strip()
+        for brand_idx, company in enumerate(companies):
+            brand_name = str(company.get("company_name") or "").strip()
             domain = _normalise_domain(company.get("website_url"))
-            chosen = None
-            status.text(f"Searching {idx + 1}/{len(companies)}: {company_name}")
+            status.text(f"{brand_idx + 1}/{len(companies)} — {brand_name}")
+            final = None
+            last_candidate = None
+            stop_on_error = False
+
             if not domain:
-                results.append({"brand": company_name, "status": "Skipped — no website/domain"})
-                no_match += 1
-                progress.progress((idx + 1) / len(companies))
+                final_rows.append({
+                    "brand": brand_name, "contact": "", "designation": "",
+                    "email": "", "LinkedIn": "", "status": "Skipped — missing website/domain",
+                })
+                progress.progress((brand_idx + 1) / len(companies))
                 continue
+
             for category, titles in priority_queries:
                 payload = {
                     "pagination": {"page": 0, "size": 10},
@@ -474,146 +480,153 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
                 try:
                     with LushaProspectingClient() as client:
                         response = client.prospect_contacts(payload)
-                except Exception as exc:
-                    results.append({"brand": company_name, "status": f"Search error: {type(exc).__name__}: {exc}"})
-                    chosen = None
-                    break
-                raw_contacts = _extract_contacts(response)
-                normalized = [_normalise_contact(item, company_name, domain) for item in raw_contacts]
-                ranked = [item for item in _rank_contacts([x for x in normalized if x]) if item["role_category"] == category]
-                if ranked:
-                    chosen = ranked[0]
-                    chosen["company_id"] = str(company["id"])
-                    chosen["bulk_selection_priority"] = category
-                    chosen["bulk_dataset"] = batch_label
+                except Exception as search_error:
+                    final = {
+                        "brand": brand_name, "contact": "", "designation": "",
+                        "email": "", "LinkedIn": "",
+                        "status": f"Prospecting error in {category}: {type(search_error).__name__}",
+                    }
+                    stop_on_error = True
                     break
 
-            if chosen:
-                ident = _contact_identity(chosen)
-                is_already_saved = False
-                if not existing_df.empty:
-                    known = existing_df.apply(lambda row: _contact_identity(row.to_dict()), axis=1)
-                    matching_rows = existing_df.index[known == ident].tolist()
-                    if matching_rows:
-                        is_already_saved = True
-                        existing_row_index = matching_rows[-1]
-                        # Attach this discovery to the selected batch while preserving
-                        # any previously revealed contact details on the saved row.
-                        for key, value in chosen.items():
-                            if key not in existing_df.columns:
-                                existing_df[key] = ""
-                            if key in ("revealed_emails", "revealed_phones", "emails_reveal_status", "phones_reveal_status"):
-                                if not str(existing_df.at[existing_row_index, key] or "").strip():
-                                    existing_df.at[existing_row_index, key] = value
-                            else:
-                                existing_df.at[existing_row_index, key] = value
-                    else:
-                        existing_df = pd.concat([existing_df, pd.DataFrame([chosen])], ignore_index=True, sort=False)
-                        saved_count += 1
+                normalized = [
+                    _normalise_contact(item, brand_name, domain)
+                    for item in _extract_contacts(response)
+                ]
+                ranked = [
+                    item for item in _rank_contacts([x for x in normalized if x])
+                    if item.get("role_category") == category
+                ]
+                # Reveal one best-ranked candidate in this category before falling
+                # back to the next category. Do not fan out reveal requests.
+                if not ranked:
+                    continue
+                candidate = ranked[0]
+                candidate["company_id"] = str(company.get("id", ""))
+                candidate["bulk_selection_priority"] = category
+                candidate["bulk_dataset"] = batch_label
+                last_candidate = candidate
+
+                # Persist the candidate first: the reveal safety ledger requires
+                # a unique contact-ID row in the CSV.
+                current = pd.read_csv(output_path, dtype=str).fillna("") if output_path.exists() else pd.DataFrame()
+                if not current.empty:
+                    current = current.astype(object)
+                identity = _contact_identity(candidate)
+                if not current.empty:
+                    identities = current.apply(lambda row: _contact_identity(row.to_dict()), axis=1)
+                    match_indices = current.index[identities == identity].tolist()
                 else:
-                    existing_df = pd.DataFrame([chosen])
-                    saved_count += 1
-                existing_df.to_csv(output_path, index=False, encoding="utf-8-sig")
-                results.append({
-                    "brand": company_name,
-                    "contact": chosen["contact_name"],
-                    "designation": chosen["designation"],
-                    "status": "Already saved" if is_already_saved else "Saved",
-                })
+                    match_indices = []
+                if match_indices:
+                    row_idx = match_indices[-1]
+                    for key, value in candidate.items():
+                        if key not in current.columns:
+                            current[key] = ""
+                        current.at[row_idx, key] = value
+                else:
+                    current = pd.concat([current, pd.DataFrame([candidate])], ignore_index=True, sort=False)
+                current.to_csv(output_path, index=False, encoding="utf-8-sig")
+
+                contact_id = str(candidate.get("lusha_contact_id") or "").strip()
+                if not contact_id:
+                    # Without a Lusha contact ID, reveal cannot be attempted.
+                    final = {
+                        "brand": brand_name, "contact": candidate["contact_name"],
+                        "designation": candidate["designation"], "email": "",
+                        "LinkedIn": candidate.get("linkedin_url", ""),
+                        "status": f"{category}: contact ID unavailable; moving to next priority",
+                    }
+                    continue
+
+                prior_email = str(candidate.get("revealed_emails") or "").strip()
+                prior_status = str(candidate.get("emails_reveal_status") or "").strip()
+                if prior_email:
+                    final = {
+                        "brand": brand_name, "contact": candidate["contact_name"],
+                        "designation": candidate["designation"], "email": prior_email,
+                        "LinkedIn": candidate.get("linkedin_url", ""),
+                        "status": f"Email already saved ({category})",
+                    }
+                    break
+                if prior_status:
+                    # Never retry a contact with an uncertain/prior reveal status.
+                    final = {
+                        "brand": brand_name, "contact": candidate["contact_name"],
+                        "designation": candidate["designation"], "email": "",
+                        "LinkedIn": candidate.get("linkedin_url", ""),
+                        "status": f"Skipped due to prior reveal status ({category})",
+                    }
+                    stop_on_error = True
+                    break
+
                 try:
-                    add_contact(company["id"], {
-                        "contact_name": chosen.get("contact_name", ""),
-                        "designation": chosen.get("designation", ""),
-                        "linkedin_url": chosen.get("linkedin_url", ""),
-                        "contact_source": "Lusha Bulk Prospecting API",
-                        "enrichment_status": "prospected",
-                    })
-                except Exception:
-                    pass
-            else:
-                if not results or results[-1].get("brand") != company_name:
-                    results.append({"brand": company_name, "status": "No matching priority contact found"})
-                    no_match += 1
-            progress.progress((idx + 1) / len(companies))
+                    emails, credits = _reveal_one(output_path, contact_id, "emails")
+                except Exception as reveal_error:
+                    final = {
+                        "brand": brand_name, "contact": candidate["contact_name"],
+                        "designation": candidate["designation"], "email": "",
+                        "LinkedIn": candidate.get("linkedin_url", ""),
+                        "status": f"Reveal uncertain/error ({category}); stopped to avoid duplicate charge",
+                    }
+                    stop_on_error = True
+                    break
+
+                if emails:
+                    final = {
+                        "brand": brand_name, "contact": candidate["contact_name",
+                        "designation": candidate["designation"], "email": "; ".join(emails),
+                        "LinkedIn": candidate.get("linkedin_url", ""),
+                        "status": f"Email found — {category} ({credits} credits)",
+                    }
+                    try:
+                        add_contact(company.get("id"), {
+                            "contact_name": candidate.get("contact_name", ""),
+                            "designation": candidate.get("designation", ""),
+                            "linkedin_url": candidate.get("linkedin_url", ""),
+                            "contact_source": "Lusha Bulk Waterfall Prospecting + Reveal",
+                            "enrichment_status": "revealed",
+                        })
+                    except Exception:
+                        pass
+                    saved_count += 1
+                    break
+
+                # Lusha explicitly returned no email for this contact: move on.
+                final = {
+                    "brand": brand_name, "contact": candidate["contact_name"],
+                    "designation": candidate["designation"], "email": "",
+                    "LinkedIn": candidate.get("linkedin_url", ""),
+                    "status": f"No email — tried {category} ({credits} credits); checking next priority",
+                }
+
+            if final is None and last_candidate:
+                final = {
+                    "brand": brand_name, "contact": last_candidate["contact_name"],
+                    "designation": last_candidate["designation"], "email": "",
+                    "LinkedIn": last_candidate.get("linkedin_url", ""),
+                    "status": "All priority categories exhausted; no email found",
+                }
+            if final is None:
+                final = {
+                    "brand": brand_name, "contact": "", "designation": "",
+                    "email": "", "LinkedIn": "", "status": "No matching contact found",
+                }
+            if not final.get("email"):
+                no_email_count += 1
+            final_rows.append(final)
+            progress.progress((brand_idx + 1) / len(companies))
 
         status.empty()
         progress.empty()
-        st.success(f"Bulk discovery completed. {saved_count} new contacts saved; {no_match} brands had no match or were skipped.")
-        if results:
-            st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+        st.success(
+            f"Automated waterfall completed. {saved_count} brands returned email addresses; "
+            f"{no_email_count} did not."
+        )
+        if final_rows:
+            st.dataframe(pd.DataFrame(final_rows), use_container_width=True, hide_index=True)
 
-    # Bulk email reveal is a separate, explicitly approved paid action.
-    st.divider()
-    st.subheader("Bulk email reveal")
-    st.caption(
-        "Reveal email addresses for contacts discovered in this dataset. "
-        "Each contact is processed individually using the existing brand-level safety ledger. "
-        "Email reveals may consume credits; phone numbers are not requested."
-    )
-    email_approval = st.checkbox(
-        "I approve email reveal requests for all eligible contacts in this dataset. These requests may consume Lusha credits.",
- 
-        key=f"pq_bulk_email_approve_{batch_label}",
-    )
-    if st.button(
-        "Reveal emails for all discovered contacts in this dataset",
-        disabled=not email_approval,
-        type="primary",
-        key=f"pq_bulk_email_reveal_{batch_label}",
-    ):
-        try:
-            from enrichment.lusha_reveal_ui import _reveal_one
-
-            contacts_df = pd.read_csv(output_path, dtype=str).fillna("")
-            batch_contacts = contacts_df[
-                contacts_df.get("bulk_dataset", pd.Series("", index=contacts_df.index)).astype(str)
-                == str(batch_label)
-            ].copy()
-            eligible_contacts = batch_contacts[
-                batch_contacts.get("lusha_contact_id", pd.Series("", index=batch_contacts.index)).astype(str).str.strip() != ""
-            ]
-            reveal_progress = st.progress(0)
-            reveal_status = st.empty()
-            reveal_results = []
-            for reveal_idx, (_, contact_row) in enumerate(eligible_contacts.iterrows()):
-                contact_id = str(contact_row.get("lusha_contact_id", "")).strip()
-                contact_name = str(contact_row.get("contact_name", "")).strip()
-                brand_name = str(contact_row.get("company_name", "")).strip()
-                reveal_status.text(
-                    f"Revealing email {reveal_idx + 1}/{len(eligible_contacts)}: {brand_name}"
-                )
-                existing_email = str(contact_row.get("revealed_emails", "")).strip()
-                prior_status = str(contact_row.get("emails_reveal_status", "")).strip()
-                if existing_email:
-                    reveal_results.append({"brand": brand_name, "contact": contact_name, "email": existing_email, "status": "Already revealed"})
-                elif prior_status:
-                    reveal_results.append({"brand": brand_name, "contact": contact_name, "email": "", "status": f"Skipped — prior status: {prior_status}"})
-                else:
-                    try:
-                        values, credits = _reveal_one(output_path, contact_id, "emails")
-                        reveal_results.append({
-                            "brand": brand_name,
-                            "contact": contact_name,
-                            "email": "; ".join(values or []),
-                            "status": f"Revealed ({credits} credits)" if values else f"No email returned ({credits} credits)",
-                        })
-                    except Exception as reveal_error:
-                        reveal_results.append({
-                            "brand": brand_name,
-                            "contact": contact_name,
-                            "email": "",
-                            "status": f"Reveal error — check billing: {type(reveal_error).__name__}",
-                        })
-                reveal_progress.progress((reveal_idx + 1) / max(len(eligible_contacts), 1))
-            reveal_status.empty()
-            reveal_progress.empty()
-            st.write("**Bulk email reveal results**")
-            st.dataframe(pd.DataFrame(reveal_results), use_container_width=True, hide_index=True)
-            st.cache_data.clear()
-        except Exception as bulk_error:
-            st.error(f"Bulk email reveal failed: {type(bulk_error).__name__}: {bulk_error}")
-
-    # Display the saved contact rows for this dataset, including revealed email values.
+    # Always render saved results on Streamlit reruns, independent of the action button.
     if output_path.exists():
         saved_contacts_df = pd.read_csv(output_path, dtype=str).fillna("")
         dataset_contacts = saved_contacts_df[
@@ -621,13 +634,13 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
             == str(batch_label)
         ].copy()
         if not dataset_contacts.empty:
-            for column in ("contact_name", "designation", "company_name", "revealed_emails", "linkedin_url"):
+            for column in ("company_name", "contact_name", "designation", "revealed_emails", "linkedin_url"):
                 if column not in dataset_contacts.columns:
                     dataset_contacts[column] = ""
-            st.write("**Discovered contacts for this dataset**")
+            st.write("**Contacts and emails saved for this dataset**")
             st.dataframe(
                 dataset_contacts[["company_name", "contact_name", "designation", "revealed_emails", "linkedin_url"]],
                 use_container_width=True,
                 hide_index=True,
             )
-    st.caption("Bulk email reveal is separate from discovery; phone numbers are not revealed.")
+    st.caption("Phone numbers are not requested or revealed in this workflow.")
