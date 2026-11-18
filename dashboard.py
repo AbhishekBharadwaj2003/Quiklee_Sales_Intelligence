@@ -721,19 +721,23 @@ elif page == "Pre-Qualified Leads":
 
     st.divider()
     st.subheader("3. Contact intelligence — skip traffic research")
-    # Do not display previously imported companies when no dataset is currently uploaded.
-    if prequalified_file is None:
-        st.session_state.pop("pq_active_import_batch", None)
-        st.session_state.pop("pq_company_selector", None)
-        active_pq_batch = None
-        pq_companies = []
-    else:
-        active_pq_batch = st.session_state.get("pq_active_import_batch")
-        pq_companies = (
-            get_prequalified_companies(import_batch=active_pq_batch)
-            if active_pq_batch
-            else []
-        )
+    # Load contact intelligence from saved batches, independent of the uploader widget.
+    # Streamlit reruns can clear the uploader value after import; the database is the source of truth.
+    saved_batch_names = [item["import_batch"] for item in get_prequalified_import_batches()]
+    active_pq_batch = st.session_state.get("pq_active_import_batch")
+    if active_pq_batch not in saved_batch_names:
+        active_pq_batch = saved_batch_names[0] if saved_batch_names else None
+        if active_pq_batch:
+            st.session_state["pq_active_import_batch"] = active_pq_batch
+        else:
+            st.session_state.pop("pq_active_import_batch", None)
+            st.session_state.pop("pq_company_selector", None)
+
+    pq_companies = (
+        get_prequalified_companies(import_batch=active_pq_batch)
+        if active_pq_batch
+        else []
+    )
     if not pq_companies:
         st.info("Upload your previously researched dataset to see pre-qualified brands here.")
     else:
