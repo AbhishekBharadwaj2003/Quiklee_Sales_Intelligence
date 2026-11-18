@@ -1,6 +1,5 @@
 import json
 import re
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -8,14 +7,17 @@ import pandas as pd
 import streamlit as st
 
 from enrichment.lusha_prospecting import LushaProspectingClient
+from database.db import get_db
 
-
-DB_FILE = Path(__file__).resolve().parent.parent / "quiklee_sales.db"
 
 FIELD_MAP = {
     "emails": "email",
     "phones": "phone",
 }
+
+
+def _row_value(row, key, index):
+    return row.get(key) if isinstance(row, dict) else row[index]
 
 
 def _clean(value):
@@ -109,7 +111,7 @@ def _company_id_for_contact(connection, contact):
         ).fetchall()
 
         if len(rows) == 1:
-            return rows[0][0]
+            return _row_value(rows[0], "id", 0)
 
         # Fallback handles older company rows where website_url carries domain.
         all_rows = connection.execute(
@@ -120,8 +122,8 @@ def _company_id_for_contact(connection, contact):
             """
         ).fetchall()
         matches = [
-            row[0] for row in all_rows
-            if _normalize_domain(row[1] or row[2]) == domain
+            _row_value(row, "id", 0) for row in all_rows
+            if _normalize_domain(_row_value(row, "domain", 1) or _row_value(row, "website_url", 2)) == domain
         ]
         if len(matches) == 1:
             return matches[0]
@@ -181,7 +183,7 @@ def _seed_historical_reveals(path):
     df = pd.read_csv(path, dtype=str).fillna("")
     inserted = 0
 
-    with sqlite3.connect(DB_FILE, timeout=30) as connection:
+    with get_db() as connection:
         _ensure_ledger_table(connection)
 
         for _, contact in df.iterrows():
@@ -292,7 +294,7 @@ def _reserve_brand_field(path, contact_id, field):
     now = datetime.now(timezone.utc).isoformat()
 
     with sqlite3.connect(DB_FILE, timeout=30) as connection:
-        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("BEGIN")
         _ensure_ledger_table(connection)
 
         existing = connection.execute(
@@ -307,7 +309,7 @@ def _reserve_brand_field(path, contact_id, field):
         ).fetchone()
 
         if existing:
-            status, prior_contact, attempted_at = existing
+            status, prior_contact, attempted_at = (_row_value(existing, "reveal_status", 0), _row_value(existing, "contact_id", 1), _row_value(existing, "attempted_at", 2))
             raise ValueError(
                 f"{field_type.title()} reveal is locked for brand "
                 f"'{brand_key}'. Existing status: {status}; "
@@ -390,7 +392,6 @@ def _sync_revealed_value_to_database(contact, field, values):
 
     company_id = None
     with sqlite3.connect(DB_FILE, timeout=30) as connection:
-        connection.row_factory = sqlite3.Row
         company_id = _company_id_for_contact(connection, contact)
 
         if company_id is None:
@@ -426,11 +427,6 @@ def _sync_revealed_value_to_database(contact, field, values):
 
 
 def _reveal_one(path, contact_id, field):
-    if not DB_FILE.exists():
-        raise FileNotFoundError(
-            f"SQLite database not found: {DB_FILE}"
-        )
-
     # Seed known historical reveals before attempting a new request.
     _seed_historical_reveals(path)
 
@@ -531,10 +527,6 @@ def render_lusha_reveal_ui(csv_path, company_id=None, company_domain=None, compa
 
     if not path.exists():
         st.warning("Lusha contacts CSV was not found.")
-        return
-
-    if not DB_FILE.exists():
-        st.error("SQLite database was not found. Contact reveals are disabled.")
         return
 
     try:
