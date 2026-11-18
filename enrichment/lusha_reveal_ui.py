@@ -218,10 +218,10 @@ def _seed_historical_reveals(path):
                 exists = connection.execute(
                     """
                     SELECT id FROM contact_reveal_ledger
-                    WHERE brand_key = ? AND field_type = ?
+                    WHERE brand_key = ? AND field_type = ? AND contact_id = ?
                     LIMIT 1
                     """,
-                    (brand_key, field_type),
+                    (brand_key, field_type, contact_id),
                 ).fetchone()
 
                 if exists:
@@ -301,11 +301,11 @@ def _reserve_brand_field(path, contact_id, field):
             """
             SELECT reveal_status, contact_id, attempted_at
             FROM contact_reveal_ledger
-            WHERE brand_key = ? AND field_type = ?
+            WHERE brand_key = ? AND field_type = ? AND contact_id = ?
             ORDER BY id
             LIMIT 1
             """,
-            (brand_key, field_type),
+            (brand_key, field_type, contact_id),
         ).fetchone()
 
         if existing:
