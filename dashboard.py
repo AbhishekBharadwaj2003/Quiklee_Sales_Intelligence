@@ -671,6 +671,8 @@ elif page == "Pre-Qualified Leads":
                             pq_batch_name,
                         )
                         st.success("Pre-qualified dataset imported. No TabAPI requests were made.")
+                        # Restrict contact selection to this newly imported dataset.
+                        st.session_state["pq_active_import_batch"] = pq_batch_name.strip()
                         a, b, c, d = st.columns(4)
                         a.metric("New companies", import_result["imported_companies"])
                         b.metric("Existing companies reused", import_result["reused_companies"])
@@ -689,7 +691,8 @@ elif page == "Pre-Qualified Leads":
 
     st.divider()
     st.subheader("3. Contact intelligence — skip traffic research")
-    pq_companies = get_prequalified_companies()
+    active_pq_batch = st.session_state.get("pq_active_import_batch")
+    pq_companies = get_prequalified_companies(import_batch=active_pq_batch)
     if not pq_companies:
         st.info("Upload your previously researched dataset to see pre-qualified brands here.")
     else:
