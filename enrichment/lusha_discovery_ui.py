@@ -423,118 +423,124 @@ def render_lusha_bulk_discovery_ui(output_path, companies, batch_label):
         "I approve Lusha prospecting searches for all brands in this dataset. Searches may consume plan credits.",
         key=f"pq_bulk_approve_{batch_label}",
     )
-    if not st.button("Discover one contact for every brand", type="primary",
-                    disabled=not approved or not companies, key=f"pq_bulk_run_{batch_label}"):
-        return
-
-    priority_queries = [
-        ("Operations", ["Operations Head", "Head of Operations", "VP Operations", "Director of Operations"]),
-        ("Growth", ["Growth Head", "Head of Growth", "VP Growth", "Director of Growth"]),
-        ("Supply Chain", ["Supply Chain Head", "Head of Supply Chain", "VP Supply Chain", "Director Supply Chain"]),
-        ("Marketplace / D2C", ["Marketplace Head", "D2C Head", "Head of Marketplace", "Head of D2C"]),
-    ]
+    run_discovery = st.button(
+        "Discover one contact for every brand",
+        type="primary",
+        disabled=not approved or not companies,
+        key=f"pq_bulk_run_{batch_label}",
+    )
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    existing_df = pd.read_csv(output_path, dtype=str).fillna("") if output_path.exists() else pd.DataFrame()
-    # Streamlit Cloud may use pandas Arrow-backed string columns; convert to
-    # writable object columns before row-level updates.
-    if not existing_df.empty:
-        existing_df = existing_df.astype(object)
-    progress = st.progress(0)
-    status = st.empty()
-    results = []
-    no_match = 0
-    saved_count = 0
 
-    for idx, company in enumerate(companies):
-        company_name = str(company.get("company_name") or "").strip()
-        domain = _normalise_domain(company.get("website_url"))
-        chosen = None
-        status.text(f"Searching {idx + 1}/{len(companies)}: {company_name}")
-        if not domain:
-            results.append({"brand": company_name, "status": "Skipped — no website/domain"})
-            no_match += 1
-            progress.progress((idx + 1) / len(companies))
-            continue
-        for category, titles in priority_queries:
-            payload = {
-                "pagination": {"page": 0, "size": 10},
-                "filters": {
-                    "companies": {"include": {"domains": [domain]}},
-                    "contacts": {"include": {"jobTitles": titles}},
-                },
-                "options": {"includePartialProfiles": True},
-            }
-            try:
-                with LushaProspectingClient() as client:
-                    response = client.prospect_contacts(payload)
-            except Exception as exc:
-                results.append({"brand": company_name, "status": f"Search error: {type(exc).__name__}: {exc}"})
-                chosen = None
-                break
-            raw_contacts = _extract_contacts(response)
-            normalized = [_normalise_contact(item, company_name, domain) for item in raw_contacts]
-            ranked = [item for item in _rank_contacts([x for x in normalized if x]) if item["role_category"] == category]
-            if ranked:
-                chosen = ranked[0]
-                chosen["company_id"] = str(company["id"])
-                chosen["bulk_selection_priority"] = category
-                chosen["bulk_dataset"] = batch_label
-                break
+    if run_discovery:
+        priority_queries = [
+            ("Operations", ["Operations Head", "Head of Operations", "VP Operations", "Director of Operations"]),
+            ("Growth", ["Growth Head", "Head of Growth", "VP Growth", "Director of Growth"]),
+            ("Supply Chain", ["Supply Chain Head", "Head of Supply Chain", "VP Supply Chain", "Director Supply Chain"]),
+            ("Marketplace / D2C", ["Marketplace Head", "D2C Head", "Head of Marketplace", "Head of D2C"]),
+        ]
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        existing_df = pd.read_csv(output_path, dtype=str).fillna("") if output_path.exists() else pd.DataFrame()
+        # Streamlit Cloud may use pandas Arrow-backed string columns; convert to
+        # writable object columns before row-level updates.
+        if not existing_df.empty:
+            existing_df = existing_df.astype(object)
+        progress = st.progress(0)
+        status = st.empty()
+        results = []
+        no_match = 0
+        saved_count = 0
 
-        if chosen:
-            ident = _contact_identity(chosen)
-            is_already_saved = False
-            if not existing_df.empty:
-                known = existing_df.apply(lambda row: _contact_identity(row.to_dict()), axis=1)
-                matching_rows = existing_df.index[known == ident].tolist()
-                if matching_rows:
-                    is_already_saved = True
-                    existing_row_index = matching_rows[-1]
-                    # Attach this discovery to the selected batch while preserving
-                    # any previously revealed contact details on the saved row.
-                    for key, value in chosen.items():
-                        if key not in existing_df.columns:
-                            existing_df[key] = ""
-                        if key in ("revealed_emails", "revealed_phones", "emails_reveal_status", "phones_reveal_status"):
-                            if not str(existing_df.at[existing_row_index, key] or "").strip():
-                                existing_df.at[existing_row_index, key] = value
-                        else:
-                            existing_df.at[existing_row_index, key] = value
-                else:
-                    existing_df = pd.concat([existing_df, pd.DataFrame([chosen])], ignore_index=True, sort=False)
-                    saved_count += 1
-            else:
-                existing_df = pd.DataFrame([chosen])
-                saved_count += 1
-            existing_df.to_csv(output_path, index=False, encoding="utf-8-sig")
-            results.append({
-                "brand": company_name,
-                "contact": chosen["contact_name"],
-                "designation": chosen["designation"],
-                "status": "Already saved" if is_already_saved else "Saved",
-            })
-            try:
-                add_contact(company["id"], {
-                    "contact_name": chosen.get("contact_name", ""),
-                    "designation": chosen.get("designation", ""),
-                    "linkedin_url": chosen.get("linkedin_url", ""),
-                    "contact_source": "Lusha Bulk Prospecting API",
-                    "enrichment_status": "prospected",
-                })
-            except Exception:
-                pass
-        else:
-            if not results or results[-1].get("brand") != company_name:
-                results.append({"brand": company_name, "status": "No matching priority contact found"})
+        for idx, company in enumerate(companies):
+            company_name = str(company.get("company_name") or "").strip()
+            domain = _normalise_domain(company.get("website_url"))
+            chosen = None
+            status.text(f"Searching {idx + 1}/{len(companies)}: {company_name}")
+            if not domain:
+                results.append({"brand": company_name, "status": "Skipped — no website/domain"})
                 no_match += 1
-        progress.progress((idx + 1) / len(companies))
+                progress.progress((idx + 1) / len(companies))
+                continue
+            for category, titles in priority_queries:
+                payload = {
+                    "pagination": {"page": 0, "size": 10},
+                    "filters": {
+                        "companies": {"include": {"domains": [domain]}},
+                        "contacts": {"include": {"jobTitles": titles}},
+                    },
+                    "options": {"includePartialProfiles": True},
+                }
+                try:
+                    with LushaProspectingClient() as client:
+                        response = client.prospect_contacts(payload)
+                except Exception as exc:
+                    results.append({"brand": company_name, "status": f"Search error: {type(exc).__name__}: {exc}"})
+                    chosen = None
+                    break
+                raw_contacts = _extract_contacts(response)
+                normalized = [_normalise_contact(item, company_name, domain) for item in raw_contacts]
+                ranked = [item for item in _rank_contacts([x for x in normalized if x]) if item["role_category"] == category]
+                if ranked:
+                    chosen = ranked[0]
+                    chosen["company_id"] = str(company["id"])
+                    chosen["bulk_selection_priority"] = category
+                    chosen["bulk_dataset"] = batch_label
+                    break
 
-    status.empty()
-    progress.empty()
-    st.success(f"Bulk discovery completed. {saved_count} new contacts saved; {no_match} brands had no match or were skipped.")
-    if results:
-        st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+            if chosen:
+                ident = _contact_identity(chosen)
+                is_already_saved = False
+                if not existing_df.empty:
+                    known = existing_df.apply(lambda row: _contact_identity(row.to_dict()), axis=1)
+                    matching_rows = existing_df.index[known == ident].tolist()
+                    if matching_rows:
+                        is_already_saved = True
+                        existing_row_index = matching_rows[-1]
+                        # Attach this discovery to the selected batch while preserving
+                        # any previously revealed contact details on the saved row.
+                        for key, value in chosen.items():
+                            if key not in existing_df.columns:
+                                existing_df[key] = ""
+                            if key in ("revealed_emails", "revealed_phones", "emails_reveal_status", "phones_reveal_status"):
+                                if not str(existing_df.at[existing_row_index, key] or "").strip():
+                                    existing_df.at[existing_row_index, key] = value
+                            else:
+                                existing_df.at[existing_row_index, key] = value
+                    else:
+                        existing_df = pd.concat([existing_df, pd.DataFrame([chosen])], ignore_index=True, sort=False)
+                        saved_count += 1
+                else:
+                    existing_df = pd.DataFrame([chosen])
+                    saved_count += 1
+                existing_df.to_csv(output_path, index=False, encoding="utf-8-sig")
+                results.append({
+                    "brand": company_name,
+                    "contact": chosen["contact_name"],
+                    "designation": chosen["designation"],
+                    "status": "Already saved" if is_already_saved else "Saved",
+                })
+                try:
+                    add_contact(company["id"], {
+                        "contact_name": chosen.get("contact_name", ""),
+                        "designation": chosen.get("designation", ""),
+                        "linkedin_url": chosen.get("linkedin_url", ""),
+                        "contact_source": "Lusha Bulk Prospecting API",
+                        "enrichment_status": "prospected",
+                    })
+                except Exception:
+                    pass
+            else:
+                if not results or results[-1].get("brand") != company_name:
+                    results.append({"brand": company_name, "status": "No matching priority contact found"})
+                    no_match += 1
+            progress.progress((idx + 1) / len(companies))
+
+        status.empty()
+        progress.empty()
+        st.success(f"Bulk discovery completed. {saved_count} new contacts saved; {no_match} brands had no match or were skipped.")
+        if results:
+            st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
 
     # Bulk email reveal is a separate, explicitly approved paid action.
     st.divider()
